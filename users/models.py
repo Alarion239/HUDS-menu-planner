@@ -40,6 +40,12 @@ class UserProfile(models.Model):
     lunch_notification = models.BooleanField(default=True)
     dinner_notification = models.BooleanField(default=True)
     
+    # Admin status
+    is_admin = models.BooleanField(
+        default=False,
+        help_text="Admin users can trigger manual menu fetches and other admin commands"
+    )
+    
     # Metadata
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

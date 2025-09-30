@@ -16,6 +16,8 @@ from bot.handlers import (
     history_command,
     feedback_handler,
     meal_plan_callback,
+    fetch_command,
+    stats_command,
 )
 
 logging.basicConfig(
@@ -50,6 +52,10 @@ class Command(BaseCommand):
         application.add_handler(CommandHandler("goals", goals_command))
         application.add_handler(CommandHandler("today", today_command))
         application.add_handler(CommandHandler("history", history_command))
+        
+        # Admin commands
+        application.add_handler(CommandHandler("fetch", fetch_command))
+        application.add_handler(CommandHandler("stats", stats_command))
         
         # Register callback handler for meal plan buttons
         application.add_handler(CallbackQueryHandler(meal_plan_callback))

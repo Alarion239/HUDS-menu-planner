@@ -67,6 +67,15 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /help command"""
+    chat_id = update.effective_chat.id
+    
+    # Check if user is admin
+    try:
+        profile = await sync_to_async(UserProfile.objects.get)(telegram_chat_id=chat_id)
+        is_admin = profile.is_admin
+    except UserProfile.DoesNotExist:
+        is_admin = False
+    
     message = (
         "🍽️ **HUDS Menu Planner**\n\n"
         "**Commands:**\n"
@@ -85,6 +94,14 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "I'll send you personalized meal plans before each meal!\n"
         "Or use /nextmeal to generate one on demand."
     )
+    
+    if is_admin:
+        message += (
+            "\n\n**Admin Commands:**\n"
+            "/fetch - Manually fetch menus for a date\n"
+            "/stats - View system statistics"
+        )
+    
     await update.message.reply_text(message, parse_mode='Markdown')
 
 
@@ -757,6 +774,156 @@ async def meal_plan_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             "Then use /nextmeal again to generate a new plan with your updated preferences.",
             parse_mode='Markdown'
         )
+
+
+async def fetch_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /fetch command - admin only, manually fetch menus"""
+    chat_id = update.effective_chat.id
+    
+    # Check if user is admin
+    try:
+        profile = await sync_to_async(UserProfile.objects.get)(telegram_chat_id=chat_id)
+    except UserProfile.DoesNotExist:
+        await update.message.reply_text("❌ Please use /start first to register!")
+        return
+    
+    if not profile.is_admin:
+        await update.message.reply_text("❌ This command is only available to admins.")
+        return
+    
+    # Parse date argument or use tomorrow
+    from datetime import date, timedelta
+    import sys
+    import os
+    
+    if context.args:
+        # Try to parse date from args (format: YYYY-MM-DD or MM/DD/YYYY)
+        date_str = context.args[0]
+        try:
+            # Try YYYY-MM-DD format
+            if '-' in date_str:
+                year, month, day = date_str.split('-')
+                fetch_date = date(int(year), int(month), int(day))
+            # Try MM/DD/YYYY format
+            elif '/' in date_str:
+                month, day, year = date_str.split('/')
+                fetch_date = date(int(year), int(month), int(day))
+            else:
+                await update.message.reply_text(
+                    "❌ Invalid date format. Use YYYY-MM-DD or MM/DD/YYYY\n"
+                    "Example: `/fetch 2025-09-30` or `/fetch 9/30/2025`"
+                )
+                return
+        except (ValueError, IndexError):
+            await update.message.reply_text(
+                "❌ Invalid date format. Use YYYY-MM-DD or MM/DD/YYYY\n"
+                "Example: `/fetch 2025-09-30` or `/fetch 9/30/2025`"
+            )
+            return
+    else:
+        # Default to tomorrow
+        fetch_date = date.today() + timedelta(days=1)
+    
+    status_msg = await update.message.reply_text(
+        f"🔄 Fetching menus for {fetch_date}..."
+    )
+    
+    try:
+        # Import and run the fetch task
+        sys.path.insert(0, os.path.join(settings.BASE_DIR, 'menu'))
+        from menu.tasks import fetch_tomorrow_menus
+        
+        @sync_to_async
+        def run_fetch_task():
+            # Call the Celery task synchronously for admin command
+            return fetch_tomorrow_menus(target_date=fetch_date)
+        
+        result = await run_fetch_task()
+        
+        if result.get('status') == 'success':
+            stats = result.get('stats', {})
+            message = (
+                f"✅ Successfully fetched menus for {fetch_date}\n\n"
+                f"📊 Stats:\n"
+                f"• Breakfast: {stats.get('breakfast', 0)} dishes\n"
+                f"• Lunch: {stats.get('lunch', 0)} dishes\n"
+                f"• Dinner: {stats.get('dinner', 0)} dishes\n"
+                f"• Total: {stats.get('total', 0)} dishes"
+            )
+        else:
+            message = f"⚠️ Fetch completed with warnings:\n{result.get('message', 'Unknown status')}"
+        
+        await status_msg.edit_text(message)
+        
+    except Exception as e:
+        logger.error(f"Error in /fetch command: {e}")
+        await status_msg.edit_text(
+            f"❌ Error fetching menus:\n{str(e)}"
+        )
+
+
+async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /stats command - admin only, show system statistics"""
+    chat_id = update.effective_chat.id
+    
+    # Check if user is admin
+    try:
+        profile = await sync_to_async(UserProfile.objects.get)(telegram_chat_id=chat_id)
+    except UserProfile.DoesNotExist:
+        await update.message.reply_text("❌ Please use /start first to register!")
+        return
+    
+    if not profile.is_admin:
+        await update.message.reply_text("❌ This command is only available to admins.")
+        return
+    
+    @sync_to_async
+    def get_stats():
+        from datetime import date, timedelta
+        
+        # Get counts
+        total_users = UserProfile.objects.count()
+        active_users = UserProfile.objects.filter(notifications_enabled=True).count()
+        total_dishes = Dish.objects.count()
+        
+        # Get recent menu count
+        today = date.today()
+        week_ago = today - timedelta(days=7)
+        recent_menus = DailyMenu.objects.filter(date__gte=week_ago).count()
+        
+        # Get meal plans generated
+        total_meal_plans = MealPlan.objects.count()
+        recent_meal_plans = MealPlan.objects.filter(
+            created_at__gte=timezone.now() - timedelta(days=7)
+        ).count()
+        
+        # Get feedback count
+        total_feedback = UserFeedback.objects.count()
+        
+        return {
+            'total_users': total_users,
+            'active_users': active_users,
+            'total_dishes': total_dishes,
+            'recent_menus': recent_menus,
+            'total_meal_plans': total_meal_plans,
+            'recent_meal_plans': recent_meal_plans,
+            'total_feedback': total_feedback
+        }
+    
+    stats = await get_stats()
+    
+    message = (
+        "📊 **System Statistics**\n\n"
+        f"👥 Users: {stats['total_users']} ({stats['active_users']} active)\n"
+        f"🍽️ Total Dishes: {stats['total_dishes']}\n"
+        f"📅 Menus (Last 7 days): {stats['recent_menus']}\n"
+        f"🎯 Meal Plans Generated:\n"
+        f"   • Total: {stats['total_meal_plans']}\n"
+        f"   • Last 7 days: {stats['recent_meal_plans']}\n"
+        f"💬 Total Feedback: {stats['total_feedback']}"
+    )
+    
+    await update.message.reply_text(message, parse_mode='Markdown')
 
 
 async def format_meal_plan_async(meal_plan):
