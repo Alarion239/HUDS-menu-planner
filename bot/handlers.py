@@ -301,8 +301,8 @@ async def nextmeal_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         from huds_lib.model import create_meal
         
         # Get user preferences and feedback
-        user_prefs = profile.get_preferences_text()
-        feedback_summary = profile.get_feedback_summary(include_weighted_ratings=True)
+        user_prefs = await sync_to_async(profile.get_preferences_text)()
+        feedback_summary = await sync_to_async(lambda: profile.get_feedback_summary(include_weighted_ratings=True))()
 
         # Combine preferences and feedback
         if feedback_summary:
