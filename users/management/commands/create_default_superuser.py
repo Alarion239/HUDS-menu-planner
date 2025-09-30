@@ -23,6 +23,13 @@ class Command(BaseCommand):
                 self.style.SUCCESS(f'Superuser "{username}" created successfully!')
             )
         else:
+            # Update existing superuser password
+            user = User.objects.get(username=username)
+            user.set_password(password)
+            user.email = email
+            user.is_superuser = True
+            user.is_staff = True
+            user.save()
             self.stdout.write(
-                self.style.WARNING(f'Superuser "{username}" already exists.')
+                self.style.SUCCESS(f'Superuser "{username}" password updated!')
             )
