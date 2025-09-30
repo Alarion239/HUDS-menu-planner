@@ -491,28 +491,47 @@ async def feedback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             client = OpenAI(api_key=settings.OPENAI_API_KEY)
             
+            # Get list of available dishes from recent menus (last 7 days)
+            from datetime import timedelta
+            from django.utils import timezone
+            seven_days_ago = timezone.now() - timedelta(days=7)
+            
+            # Get all dishes from recent daily menus
+            recent_dishes = Dish.objects.filter(
+                dailymenu__date__gte=seven_days_ago
+            ).distinct().values_list('name', flat=True).order_by('name')[:200]  # Limit to avoid token overflow
+            
+            available_dishes_list = "\n".join([f"- {dish}" for dish in recent_dishes])
+            
             # Ask GPT to extract dish names and ratings from the feedback
             prompt = f"""Analyze this user feedback about HUDS dining hall food and extract:
 1. Which specific dishes are mentioned
 2. A rating from -2 to 2 for each dish:
-   -2 = Never again (disgusting/frozen strawberries)
+   -2 = Never again (disgusting/hated it)
    -1 = Bad but edible (don't like)
     0 = Neutral (no strong opinion)
     1 = Good, liked it
     2 = Absolutely love it
+
+IMPORTANT: You MUST use EXACT dish names from this list (case-sensitive):
+{available_dishes_list}
 
 User feedback: "{feedback_text}"
 
 Return ONLY a valid JSON object with this structure:
 {{
   "dishes": [
-    {{"name": "Dish Name", "rating": -2, "reason": "brief reason"}},
-    {{"name": "Another Dish", "rating": -1, "reason": "brief reason"}}
+    {{"name": "Exact Dish Name From List", "rating": -2, "reason": "brief reason"}},
+    {{"name": "Another Exact Dish Name", "rating": 1, "reason": "brief reason"}}
   ],
-  "general_preferences": "any dietary preferences mentioned"
+  "general_preferences": "any dietary preferences mentioned (like 'wants more protein' or 'prefers oatmeal')"
 }}
 
-If no specific dishes are mentioned, return an empty dishes array."""
+Rules:
+- ONLY use exact dish names from the provided list
+- If a dish isn't in the list, don't include it in dishes array
+- Put general food preferences in "general_preferences" field
+- If no specific dishes from the list are mentioned, return empty dishes array"""
             
             # Get the model name from settings or use gpt-5 as default
             model_name = getattr(settings, 'OPENAI_MODEL', 'gpt-5')
@@ -542,6 +561,8 @@ If no specific dishes are mentioned, return an empty dishes array."""
                     raise ValueError("Could not extract valid JSON from response")
             
             feedbacks_created = 0
+            dishes_saved = []
+            dishes_not_found = []
             
             # Store feedback for each dish
             for dish_feedback in data.get('dishes', []):
@@ -552,7 +573,7 @@ If no specific dishes are mentioned, return an empty dishes array."""
                 if not dish_name:
                     continue
                 
-                # Try to find the dish in database (case-insensitive)
+                # Try to find the dish in database (case-insensitive exact match first)
                 try:
                     dish = Dish.objects.get(name__iexact=dish_name)
                     
@@ -581,10 +602,26 @@ If no specific dishes are mentioned, return an empty dishes array."""
                         comment=reason
                     )
                     feedbacks_created += 1
-                    logger.info(f"Created feedback: {dish_name} = {rating} ({reason})")
+                    dishes_saved.append(dish.name)
+                    logger.info(f"Created feedback: {dish.name} = {rating} ({reason})")
                     
                 except Dish.DoesNotExist:
-                    logger.warning(f"Dish '{dish_name}' not found in database for feedback")
+                    # Try fuzzy matching (contains)
+                    similar_dishes = Dish.objects.filter(name__icontains=dish_name)[:3]
+                    if similar_dishes.count() > 0:
+                        # Found similar dishes
+                        similar_names = [d.name for d in similar_dishes]
+                        dishes_not_found.append({
+                            'attempted': dish_name,
+                            'suggestions': similar_names
+                        })
+                        logger.warning(f"Dish '{dish_name}' not found exactly. Similar: {similar_names}")
+                    else:
+                        dishes_not_found.append({
+                            'attempted': dish_name,
+                            'suggestions': []
+                        })
+                        logger.warning(f"Dish '{dish_name}' not found in database for feedback")
             
             # Update dietary preferences if mentioned
             general_prefs = data.get('general_preferences', '').strip()
@@ -602,7 +639,8 @@ If no specific dishes are mentioned, return an empty dishes array."""
             
             return {
                 'feedbacks_created': feedbacks_created,
-                'dishes_processed': [d.get('name') for d in data.get('dishes', [])],
+                'dishes_saved': dishes_saved,
+                'dishes_not_found': dishes_not_found,
                 'general_preferences': general_prefs,
                 'prefs_updated': prefs_updated
             }
