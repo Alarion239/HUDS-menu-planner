@@ -588,16 +588,23 @@ If no specific dishes are mentioned, return an empty dishes array."""
             
             # Update dietary preferences if mentioned
             general_prefs = data.get('general_preferences', '').strip()
+            prefs_updated = False
             if general_prefs:
                 current_prefs = profile.dietary_restrictions or ''
                 if general_prefs not in current_prefs:
-                    profile.dietary_restrictions = f"{current_prefs}\n{general_prefs}".strip()
+                    if current_prefs:
+                        profile.dietary_restrictions = f"{current_prefs}. {general_prefs}".strip()
+                    else:
+                        profile.dietary_restrictions = general_prefs
                     profile.save()
+                    prefs_updated = True
+                    logger.info(f"Updated dietary preferences: {general_prefs}")
             
             return {
                 'feedbacks_created': feedbacks_created,
                 'dishes_processed': [d.get('name') for d in data.get('dishes', [])],
-                'general_preferences': general_prefs
+                'general_preferences': general_prefs,
+                'prefs_updated': prefs_updated
             }
             
         except Exception as e:
@@ -614,18 +621,29 @@ If no specific dishes are mentioned, return an empty dishes array."""
     else:
         feedbacks_created = result.get('feedbacks_created', 0)
         dishes = result.get('dishes_processed', [])
+        prefs_updated = result.get('prefs_updated', False)
+        general_prefs = result.get('general_preferences', '')
         
         if feedbacks_created > 0:
             dishes_text = ', '.join(dishes)
+            message = f"✅ Thank you! I've saved your feedback about:\n• {dishes_text}\n\n"
+            if prefs_updated and general_prefs:
+                message += f"I also noted your preference: {general_prefs}\n\n"
+            message += "I'll use this to improve your future meal recommendations!"
+            await update.message.reply_text(message)
+        elif prefs_updated and general_prefs:
             await update.message.reply_text(
-                f"✅ Thank you! I've saved your feedback about:\n"
-                f"• {dishes_text}\n\n"
-                f"I'll use this to improve your future meal recommendations!"
+                f"✅ Got it! I've added your preference:\n• {general_prefs}\n\n"
+                f"I'll prioritize this in your next meal plan.\n"
+                f"Use /nextmeal to generate a new plan with this preference!"
             )
         else:
             await update.message.reply_text(
-                "✅ Thank you for your feedback! I've noted your preferences.\n\n"
-                "For more specific feedback, try mentioning dish names from the menu."
+                "✅ Thank you for your feedback! I've noted your comments.\n\n"
+                "💡 Tip: For better results, try:\n"
+                "• Rating specific dishes: \"The scrambled eggs were amazing!\"\n"
+                "• Stating preferences: \"I want more protein\" or \"I love oatmeal\"\n"
+                "• Mentioning dislikes: \"No strawberries please\""
             )
 
 
