@@ -252,9 +252,8 @@ async def nextmeal_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         next_meal = 'breakfast'
         meal_date = today + timedelta(days=1)
     
-    await update.message.reply_text(
-        f"🔄 Generating your {next_meal} plan for {meal_date}...\n"
-        f"This may take a moment..."
+    generating_msg = await update.message.reply_text(
+        f"🔄 Generating your {next_meal} plan..."
     )
     
     # Check if menu exists
@@ -268,10 +267,9 @@ async def nextmeal_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     daily_menu = await get_daily_menu()
     
     if not daily_menu:
-        await update.message.reply_text(
-            f"❌ Sorry, the {next_meal} menu for {meal_date} hasn't been fetched yet.\n\n"
-            f"Menu data is typically fetched the night before.\n"
-            f"Please try again later or contact an administrator."
+        await generating_msg.edit_text(
+            f"❌ The {next_meal} menu for {meal_date} isn't available yet.\n"
+            f"Menus are fetched the night before. Try again later!"
         )
         return
     
@@ -288,8 +286,8 @@ async def nextmeal_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if existing_plan:
         # Show existing plan
         message = await format_meal_plan_async(existing_plan)
-        await update.message.reply_text(
-            f"✅ Here's your existing {next_meal} plan:\n\n" + message,
+        await generating_msg.edit_text(
+            message,
             parse_mode='Markdown'
         )
         return
@@ -440,17 +438,16 @@ async def nextmeal_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        await update.message.reply_text(
-            f"✅ Generated your {next_meal} plan:\n\n" + message,
+        await generating_msg.edit_text(
+            message,
             parse_mode='Markdown',
             reply_markup=reply_markup
         )
         
     except Exception as e:
         logger.error(f"Error generating meal plan: {e}")
-        await update.message.reply_text(
-            f"❌ Sorry, there was an error generating your meal plan.\n"
-            f"Error: {str(e)}\n\n"
+        await generating_msg.edit_text(
+            f"❌ Error generating meal plan.\n"
             f"Please try again later."
         )
 
@@ -475,10 +472,9 @@ async def feedback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     feedback_text = update.message.text.strip()
     
-    # Send acknowledgment
-    await update.message.reply_text(
-        "🤔 Processing your feedback...\n"
-        "I'll analyze your comments and update your preferences."
+    # Send acknowledgment (will be edited with result)
+    processing_msg = await update.message.reply_text(
+        "🤔 Processing your feedback..."
     )
     
     # Process feedback using AI
@@ -652,7 +648,7 @@ Rules:
     result = await process_feedback()
     
     if 'error' in result:
-        await update.message.reply_text(
+        await processing_msg.edit_text(
             f"❌ Sorry, I had trouble processing your feedback:\n{result['error']}\n\n"
             "Please try again or contact support."
         )
@@ -667,38 +663,27 @@ Rules:
         
         if feedbacks_created > 0:
             dishes_text = '\n• '.join(dishes_saved)
-            message = f"✅ Thank you! I've saved your feedback about:\n• {dishes_text}\n\n"
+            message = f"✅ Saved your feedback about:\n• {dishes_text}"
             if prefs_updated and general_prefs:
-                message += f"I also noted your preference: {general_prefs}\n\n"
-            message += "I'll use this to improve your future meal recommendations!"
+                message += f"\n\n📝 Added preference: {general_prefs}"
             
         if dishes_not_found:
             if message:
                 message += "\n\n"
-            message += "⚠️ I couldn't find these dishes in the menu:\n"
+            message += "⚠️ Couldn't find:\n"
             for item in dishes_not_found:
                 message += f"• {item['attempted']}\n"
                 if item['suggestions']:
                     suggestions_text = ', '.join(item['suggestions'][:2])
-                    message += f"  Did you mean: {suggestions_text}?\n"
+                    message += f"  Maybe: {suggestions_text}?\n"
             
         if not message:
             if prefs_updated and general_prefs:
-                message = (
-                    f"✅ Got it! I've added your preference:\n• {general_prefs}\n\n"
-                    f"I'll prioritize this in your next meal plan.\n"
-                    f"Use /nextmeal to generate a new plan with this preference!"
-                )
+                message = f"✅ Added preference:\n• {general_prefs}\n\nUse /nextmeal to generate a new plan!"
             else:
-                message = (
-                    "✅ Thank you for your feedback! I've noted your comments.\n\n"
-                    "💡 Tip: For better results, try:\n"
-                    "• Rating specific dishes: \"The scrambled eggs were amazing!\"\n"
-                    "• Stating preferences: \"I want more protein\" or \"I love oatmeal\"\n"
-                    "• Mentioning dislikes: \"No strawberries please\""
-                )
+                message = "✅ Noted your feedback!"
         
-        await update.message.reply_text(message)
+        await processing_msg.edit_text(message)
 
 
 async def meal_plan_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -775,7 +760,7 @@ async def meal_plan_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 async def format_meal_plan_async(meal_plan):
-    """Format a meal plan for display (async version)"""
+    """Format a meal plan for display (async version) - concise format"""
     @sync_to_async
     def get_plan_data():
         """Get all needed data from the meal plan in one sync call"""
@@ -784,7 +769,6 @@ async def format_meal_plan_async(meal_plan):
             daily_menu = meal_plan.daily_menu
             meal_type_display = daily_menu.get_meal_type_display()
             menu_date = daily_menu.date
-            explanation = meal_plan.explanation
             
             # Get dishes if they exist
             dishes_with_qty = []
@@ -796,7 +780,6 @@ async def format_meal_plan_async(meal_plan):
             return {
                 'meal_type_display': meal_type_display,
                 'menu_date': menu_date,
-                'explanation': explanation,
                 'dishes': dishes_with_qty
             }
         except Exception as e:
@@ -804,37 +787,43 @@ async def format_meal_plan_async(meal_plan):
             return {
                 'meal_type_display': 'Meal',
                 'menu_date': 'Unknown',
-                'explanation': meal_plan.explanation if hasattr(meal_plan, 'explanation') else '',
                 'dishes': []
             }
     
     plan_data = await get_plan_data()
     
-    message = f"🍽️ **{plan_data['meal_type_display']}** ({plan_data['menu_date']})\n\n"
+    # Map meal types to emojis
+    meal_emoji = {
+        'Breakfast': '🌅',
+        'Lunch': '🌞',
+        'Dinner': '🌙'
+    }
+    emoji = meal_emoji.get(plan_data['meal_type_display'], '🍽️')
     
-    if plan_data['explanation']:
-        message += f"{plan_data['explanation']}\n\n"
+    message = f"{emoji} **{plan_data['meal_type_display']}** - {plan_data['menu_date']}\n\n"
     
     # Only show dish list if there are actual dishes linked
     if plan_data['dishes']:
-        message += "**Your Meal:**\n"
+        total_cals = 0
         for item in plan_data['dishes']:
             # More descriptive quantity formatting
             if item.quantity == 1.0:
-                qty_text = "1 serving"
+                qty_text = ""
             elif item.quantity == 0.5:
-                qty_text = "½ serving"
+                qty_text = "½ "
             elif item.quantity == 1.5:
-                qty_text = "1½ servings"
+                qty_text = "1½ "
             else:
-                qty_text = f"{item.quantity} servings"
+                qty_text = f"{item.quantity}× "
 
-            message += f"• {item.dish.name} ({qty_text})\n"
-            if item.dish.calories > 0:
-                message += f"  ({int(item.dish.calories * item.quantity)} cal)\n"
-        message += "\n💚 Reply to this message with feedback!"
-    else:
-        # If no dishes are linked, the explanation should contain the meal recommendations
-        message += "\n💚 Use /feedback to share your thoughts!"
+            cals = int(item.dish.calories * item.quantity) if item.dish.calories > 0 else 0
+            if cals > 0:
+                message += f"• {qty_text}{item.dish.name} ({cals} cal)\n"
+                total_cals += cals
+            else:
+                message += f"• {qty_text}{item.dish.name}\n"
+        
+        if total_cals > 0:
+            message += f"\n📊 Total: ~{total_cals} calories"
     
     return message
