@@ -146,14 +146,27 @@ Choose your deployment method:
    - API: http://localhost/api/
    - Telegram bot: Search for your bot on Telegram
 
-### ☁️ Cloud Deployment
+### ☁️ Railway Deployment (Recommended for Production)
 
-For production deployment, see **[CLOUD_DEPLOYMENT.md](CLOUD_DEPLOYMENT.md)** for detailed instructions on deploying to:
-- **Railway** (Recommended - Easiest)
-- **DigitalOcean App Platform**
-- **Google Cloud Run**
+**Railway is the recommended option** for production deployment with excellent multi-service support.
 
-**Railway is the recommended option** for its ease of deployment and excellent Docker Compose support.
+**Quick Start**: See **[RAILWAY_QUICK_START.md](RAILWAY_QUICK_START.md)** for a 15-minute deployment guide.
+
+**Detailed Guide**: See **[RAILWAY_DEPLOYMENT.md](RAILWAY_DEPLOYMENT.md)** for comprehensive instructions.
+
+Railway advantages:
+- ✅ Easy multi-service deployment (App, Worker, Cron, Bot)
+- ✅ Managed PostgreSQL and Redis databases
+- ✅ Automatic deploys from GitHub
+- ✅ Free trial + affordable pricing ($5/month hobby plan)
+- ✅ Built-in monitoring and logging
+
+### 🐳 Other Cloud Options
+
+For alternative deployment platforms, see **[CLOUD_DEPLOYMENT.md](CLOUD_DEPLOYMENT.md)** for:
+- DigitalOcean App Platform
+- Google Cloud Run
+- AWS Elastic Beanstalk
 
 ## Usage
 

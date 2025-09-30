@@ -1,0 +1,38 @@
+# Railway Environment Variables Template
+# Copy and paste this into each Railway service's Variables section
+# Replace values in <brackets> with your actual values
+
+# ===== DATABASE (Railway Managed PostgreSQL) =====
+# These are auto-filled by Railway when you reference the Postgres service
+PGDATABASE=${{Postgres.PGDATABASE}}
+PGUSER=${{Postgres.PGUSER}}
+PGPASSWORD=${{Postgres.PGPASSWORD}}
+PGHOST=${{Postgres.PGHOST}}
+PGPORT=${{Postgres.PGPORT}}
+
+# ===== REDIS (Railway Managed Redis) =====
+# Auto-filled by Railway when you reference the Redis service
+REDIS_URL=${{Redis.REDIS_URL}}
+
+# ===== DJANGO SETTINGS =====
+# Generate a strong secret key: python -c "import secrets; print(secrets.token_urlsafe(50))"
+DJANGO_SECRET_KEY=<your-generated-secret-key-here>
+DJANGO_DEBUG=False
+DJANGO_ALLOWED_HOSTS=*.railway.app,*.up.railway.app
+
+# ===== API KEYS =====
+# Get from @BotFather on Telegram
+TELEGRAM_BOT_TOKEN=<your-bot-token>
+# Get from https://platform.openai.com/api-keys
+OPENAI_API_KEY=<your-openai-api-key>
+OPENAI_MODEL=gpt-4
+
+# ===== OPTIONAL SETTINGS =====
+TIME_ZONE=America/New_York
+
+# ===== NOTES =====
+# 1. Add these variables to ALL 4 services: App, Worker, Cron, Bot
+# 2. The ${{Service.VARIABLE}} syntax is Railway-specific - it references other services
+# 3. Make sure Postgres and Redis services are created BEFORE adding these variables
+# 4. Don't commit these values to git - they're sensitive!
+# 5. After adding variables, click "Deploy" to restart the service

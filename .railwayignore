@@ -1,0 +1,61 @@
+# Railway ignore file - files/folders to exclude from deployment
+# Similar to .dockerignore but for Railway
+
+# Local development
+.env
+.env.local
+*.sqlite3
+db.sqlite3
+
+# Docker files (Railway uses Nixpacks, not Docker)
+docker-compose.yml
+Dockerfile
+nginx.conf
+.dockerignore
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+*.cover
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# Documentation (optional - comment out if you want to include docs)
+# README.md
+# QUICKSTART.md
+# PROJECT_SUMMARY.md
+
+# Data and logs
+data/
+logs/
+*.log
+
+# Static files (will be collected on Railway)
+staticfiles/
+
+# Media files
+media/

@@ -30,7 +30,7 @@ SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'django-insecure-!6zo^b)4bjm+#o0_b@9
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv('DJANGO_DEBUG', 'True') == 'True'
 
-ALLOWED_HOSTS = os.getenv('DJANGO_ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
+ALLOWED_HOSTS = os.getenv('DJANGO_ALLOWED_HOSTS', 'localhost,127.0.0.1,*.up.railway.app').split(',')
 
 
 # Application definition
@@ -53,6 +53,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -85,14 +86,18 @@ WSGI_APPLICATION = 'huds_project.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/4.2/ref/settings/#databases
 
+# Railway uses PGDATABASE, PGUSER, etc. format
+# Docker Compose uses POSTGRES_DB, POSTGRES_USER, etc. format
+# This configuration supports both
+
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': os.getenv('POSTGRES_DB', 'huds_db'),
-        'USER': os.getenv('POSTGRES_USER', 'huds_user'),
-        'PASSWORD': os.getenv('POSTGRES_PASSWORD', 'huds_password'),
-        'HOST': os.getenv('POSTGRES_HOST', 'db'),
-        'PORT': os.getenv('POSTGRES_PORT', '5432'),
+        'NAME': os.getenv('PGDATABASE', os.getenv('POSTGRES_DB', 'huds_db')),
+        'USER': os.getenv('PGUSER', os.getenv('POSTGRES_USER', 'huds_user')),
+        'PASSWORD': os.getenv('PGPASSWORD', os.getenv('POSTGRES_PASSWORD', 'huds_password')),
+        'HOST': os.getenv('PGHOST', os.getenv('POSTGRES_HOST', 'localhost')),
+        'PORT': os.getenv('PGPORT', os.getenv('POSTGRES_PORT', '5432')),
     }
 }
 
@@ -133,6 +138,7 @@ USE_TZ = True
 
 STATIC_URL = 'static/'
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
+STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/4.2/ref/settings/#default-auto-field
