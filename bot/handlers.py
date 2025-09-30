@@ -498,7 +498,7 @@ async def feedback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             # Get all dishes from recent daily menus
             recent_dishes = Dish.objects.filter(
-                dailymenu__date__gte=seven_days_ago
+                menus__date__gte=seven_days_ago
             ).distinct().values_list('name', flat=True).order_by('name')[:200]  # Limit to avoid token overflow
             
             available_dishes_list = "\n".join([f"- {dish}" for dish in recent_dishes])
