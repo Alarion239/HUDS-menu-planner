@@ -11,6 +11,7 @@ from bot.handlers import (
     help_command,
     nextmeal_command,
     logmeal_command,
+    logmeal_callback,
     preferences_command,
     goals_command,
     today_command,
@@ -63,6 +64,7 @@ class Command(BaseCommand):
         # Register callback handlers with pattern matching
         application.add_handler(CallbackQueryHandler(fetch_date_callback, pattern=r'^fetch_date:'))
         application.add_handler(CallbackQueryHandler(meal_plan_callback, pattern=r'^(accept|modify)_'))
+        application.add_handler(CallbackQueryHandler(logmeal_callback, pattern=r'^logmeal_'))
         
         # Register message handler for feedback
         application.add_handler(MessageHandler(

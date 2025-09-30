@@ -507,18 +507,10 @@ async def logmeal_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🤔 Analyzing your meal..."
     )
     
-    # Determine which meal this is for (based on current time)
+    # Get current time for fallback
     now = datetime.now()
     today = now.date()
     current_time = now.time()
-    
-    # Determine meal type based on time
-    if current_time < time(11, 0):
-        meal_type = 'breakfast'
-    elif current_time < time(15, 0):
-        meal_type = 'lunch'
-    else:
-        meal_type = 'dinner'
     
     # Process the meal description using AI
     @sync_to_async
@@ -541,38 +533,41 @@ async def logmeal_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             available_dishes_list = "\n".join([f"- {dish}" for dish in recent_dishes])
             
-            # Ask GPT to extract dish names and quantities
-            prompt = f"""Parse this meal description and extract the dishes and quantities eaten.
+            # Ask GPT to extract dish names, quantities, and meal type
+            prompt = f"""Parse this meal description and extract information.
 
 User said: "{meal_description}"
+Current time: {current_time.strftime('%I:%M %p')} (use as fallback if meal not mentioned)
 
 Available HUDS dishes (use EXACT names from this list):
 {available_dishes_list}
 
 Extract:
-1. Each dish mentioned (use EXACT dish name from the list)
-2. The quantity (default to 1.0 if not specified)
-   - "half" = 0.5
-   - "two" or "2" = 2.0
-   - no quantity mentioned = 1.0
-3. Brief note if dish isn't in the list
+1. Meal type: breakfast, lunch, or dinner (look for keywords like "breakfast", "lunch", "dinner" in the text; if not mentioned, infer from time: before 11am=breakfast, 11am-3pm=lunch, after 3pm=dinner)
+2. Each dish mentioned with quantity
+3. For dishes NOT in the list, find 2-3 closest matches to suggest
 
 Return ONLY valid JSON:
 {{
+  "meal_type": "breakfast|lunch|dinner",
   "items": [
-    {{"name": "Exact Dish Name", "quantity": 1.0}},
-    {{"name": "Another Dish", "quantity": 0.5}}
+    {{"name": "Exact Dish Name", "quantity": 1.0, "confidence": "high"}}
   ],
-  "unknown_items": [
-    {{"description": "item user mentioned but not in HUDS list", "assumed_name": "closest match or generic name"}}
+  "unclear_items": [
+    {{
+      "user_mentioned": "what user said",
+      "quantity": 1.0,
+      "suggestions": ["Similar Dish 1", "Similar Dish 2", "Similar Dish 3"]
+    }}
   ]
 }}
 
 Rules:
-- ONLY use exact dish names from the provided list
-- Parse quantities from text (half=0.5, two=2.0, etc.)
-- If dish not in list, add to unknown_items
-- Default quantity is 1.0"""
+- Detect meal type from user's text (e.g., "for lunch" → lunch)
+- Parse quantities: half=0.5, two=2.0, one=1.0, default=1.0
+- ONLY use exact dish names from the provided list for "items"
+- For unclear dishes, provide 2-3 similar suggestions from the list
+- Match dishes case-insensitively but use exact capitalization from list"""
             
             model_name = getattr(settings, 'OPENAI_MODEL', 'gpt-5')
             
@@ -600,7 +595,29 @@ Rules:
                     raise ValueError("Could not extract valid JSON from AI response")
             
             items = data.get('items', [])
-            unknown_items = data.get('unknown_items', [])
+            unclear_items = data.get('unclear_items', [])
+            meal_type = data.get('meal_type', '').lower()
+            
+            # Validate meal type
+            if meal_type not in ['breakfast', 'lunch', 'dinner']:
+                # Fallback to time-based detection
+                if current_time < time(11, 0):
+                    meal_type = 'breakfast'
+                elif current_time < time(15, 0):
+                    meal_type = 'lunch'
+                else:
+                    meal_type = 'dinner'
+            
+            # If there are unclear items, return them for user confirmation
+            if unclear_items:
+                return {
+                    'success': True,
+                    'needs_confirmation': True,
+                    'meal_type': meal_type,
+                    'items': items,
+                    'unclear_items': unclear_items,
+                    'meal_description': meal_description
+                }
             
             # Find or create today's daily menu for this meal
             daily_menu, _ = DailyMenu.objects.get_or_create(
@@ -706,11 +723,11 @@ Rules:
             
             return {
                 'success': True,
+                'needs_confirmation': False,
                 'plan_action': plan_action,
                 'meal_type': meal_type,
                 'found_dishes': found_dishes,
                 'not_found_dishes': not_found_dishes,
-                'unknown_items': unknown_items,
                 'total_nutrition': total_nutrition
             }
             
@@ -725,6 +742,11 @@ Rules:
             f"❌ Sorry, I had trouble processing your meal:\n{result.get('error', 'Unknown error')}\n\n"
             "Please try again or contact support."
         )
+        return
+    
+    # Handle unclear items - ask for confirmation
+    if result.get('needs_confirmation'):
+        await _handle_unclear_items(update, context, processing_msg, result, profile, chat_id)
         return
     
     # Format the response
@@ -773,10 +795,385 @@ Rules:
             message += f"• {item['name']}\n"
         message += "\nThese weren't included in nutrition totals."
     
-    if result['unknown_items']:
-        message += "\n\nℹ️ Some items weren't in the HUDS menu database."
-    
     await processing_msg.edit_text(message, parse_mode='Markdown')
+
+
+async def _handle_unclear_items(update, context, processing_msg, result, profile, chat_id):
+    """Handle unclear items by asking user to select from suggestions"""
+    unclear_items = result.get('unclear_items', [])
+    items = result.get('items', [])
+    meal_type = result.get('meal_type', 'lunch')
+    
+    # Store data in context for callback
+    if 'logmeal_data' not in context.user_data:
+        context.user_data['logmeal_data'] = {}
+    
+    context.user_data['logmeal_data'] = {
+        'items': items,
+        'meal_type': meal_type,
+        'unclear_items': unclear_items,
+        'meal_description': result.get('meal_description', ''),
+        'chat_id': chat_id
+    }
+    
+    # Build message with suggestions
+    meal_emoji = {
+        'breakfast': '🌅',
+        'lunch': '🌞',
+        'dinner': '🌙'
+    }
+    emoji = meal_emoji.get(meal_type, '🍽️')
+    
+    message = f"{emoji} **Confirming {meal_type.capitalize()} Items**\n\n"
+    message += "I found some items that need clarification:\n\n"
+    
+    # Show confirmed items
+    if items:
+        message += "✅ **Confirmed:**\n"
+        for item in items:
+            qty = item.get('quantity', 1.0)
+            qty_text = f"{qty}× " if qty != 1.0 else ""
+            message += f"• {qty_text}{item['name']}\n"
+        message += "\n"
+    
+    # Show unclear items with numbered options
+    message += "❓ **Please select the correct dish for each item:**\n\n"
+    
+    # Create keyboard buttons for first unclear item
+    if unclear_items:
+        first_unclear = unclear_items[0]
+        user_mentioned = first_unclear.get('user_mentioned', 'item')
+        suggestions = first_unclear.get('suggestions', [])
+        qty = first_unclear.get('quantity', 1.0)
+        
+        qty_text = f"{qty}× " if qty != 1.0 else ""
+        message += f"You said: **{qty_text}{user_mentioned}**\n"
+        message += "Did you mean:\n"
+        
+        keyboard = []
+        for i, suggestion in enumerate(suggestions[:3]):  # Max 3 suggestions
+            keyboard.append([
+                InlineKeyboardButton(
+                    f"✓ {suggestion}",
+                    callback_data=f"logmeal_select:{i}:{suggestion[:30]}"  # Limit callback data length
+                )
+            ])
+        
+        # Add "Skip this item" button
+        keyboard.append([
+            InlineKeyboardButton(
+                "⏭ Skip this item",
+                callback_data="logmeal_skip:0"
+            )
+        ])
+        
+        # Add "Cancel" button
+        keyboard.append([
+            InlineKeyboardButton(
+                "❌ Cancel meal logging",
+                callback_data="logmeal_cancel"
+            )
+        ])
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await processing_msg.edit_text(message, parse_mode='Markdown', reply_markup=reply_markup)
+    else:
+        await processing_msg.edit_text(
+            "❌ No suggestions available. Please try again with different dish names."
+        )
+
+
+async def logmeal_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle meal logging confirmation callbacks"""
+    query = update.callback_query
+    await query.answer()
+    
+    callback_data = query.data
+    
+    # Get stored meal data
+    meal_data = context.user_data.get('logmeal_data', {})
+    if not meal_data:
+        await query.edit_message_text("❌ Session expired. Please use /logmeal again.")
+        return
+    
+    items = meal_data.get('items', [])
+    unclear_items = meal_data.get('unclear_items', [])
+    meal_type = meal_data.get('meal_type', 'lunch')
+    chat_id = meal_data.get('chat_id')
+    
+    if callback_data == "logmeal_cancel":
+        # User cancelled
+        await query.edit_message_text("❌ Meal logging cancelled.")
+        context.user_data.pop('logmeal_data', None)
+        return
+    
+    elif callback_data.startswith("logmeal_select:"):
+        # User selected a dish
+        _, idx_str, _ = callback_data.split(':', 2)
+        idx = int(idx_str)
+        
+        if unclear_items:
+            first_unclear = unclear_items[0]
+            suggestions = first_unclear.get('suggestions', [])
+            
+            if idx < len(suggestions):
+                # Add selected dish to confirmed items
+                selected_dish = suggestions[idx]
+                items.append({
+                    'name': selected_dish,
+                    'quantity': first_unclear.get('quantity', 1.0)
+                })
+            
+            # Remove this unclear item
+            unclear_items.pop(0)
+            
+            # Update stored data
+            meal_data['items'] = items
+            meal_data['unclear_items'] = unclear_items
+            context.user_data['logmeal_data'] = meal_data
+            
+            # If more unclear items, show next one
+            if unclear_items:
+                await _show_next_unclear_item(query, meal_data)
+            else:
+                # All items confirmed, proceed with logging
+                await _finalize_meal_logging(query, context, meal_data, chat_id)
+    
+    elif callback_data.startswith("logmeal_skip:"):
+        # User skipped this item
+        if unclear_items:
+            unclear_items.pop(0)
+            meal_data['unclear_items'] = unclear_items
+            context.user_data['logmeal_data'] = meal_data
+            
+            if unclear_items:
+                await _show_next_unclear_item(query, meal_data)
+            else:
+                await _finalize_meal_logging(query, context, meal_data, chat_id)
+
+
+async def _show_next_unclear_item(query, meal_data):
+    """Show the next unclear item for confirmation"""
+    unclear_items = meal_data.get('unclear_items', [])
+    items = meal_data.get('items', [])
+    meal_type = meal_data.get('meal_type', 'lunch')
+    
+    meal_emoji = {
+        'breakfast': '🌅',
+        'lunch': '🌞',
+        'dinner': '🌙'
+    }
+    emoji = meal_emoji.get(meal_type, '🍽️')
+    
+    message = f"{emoji} **Confirming {meal_type.capitalize()} Items**\n\n"
+    
+    # Show confirmed items
+    if items:
+        message += "✅ **Confirmed:**\n"
+        for item in items:
+            qty = item.get('quantity', 1.0)
+            qty_text = f"{qty}× " if qty != 1.0 else ""
+            message += f"• {qty_text}{item['name']}\n"
+        message += "\n"
+    
+    message += "❓ **Next item:**\n\n"
+    
+    next_unclear = unclear_items[0]
+    user_mentioned = next_unclear.get('user_mentioned', 'item')
+    suggestions = next_unclear.get('suggestions', [])
+    qty = next_unclear.get('quantity', 1.0)
+    
+    qty_text = f"{qty}× " if qty != 1.0 else ""
+    message += f"You said: **{qty_text}{user_mentioned}**\n"
+    message += "Did you mean:\n"
+    
+    keyboard = []
+    for i, suggestion in enumerate(suggestions[:3]):
+        keyboard.append([
+            InlineKeyboardButton(
+                f"✓ {suggestion}",
+                callback_data=f"logmeal_select:{i}:{suggestion[:30]}"
+            )
+        ])
+    
+    keyboard.append([
+        InlineKeyboardButton(
+            "⏭ Skip this item",
+            callback_data="logmeal_skip:0"
+        )
+    ])
+    
+    keyboard.append([
+        InlineKeyboardButton(
+            "❌ Cancel",
+            callback_data="logmeal_cancel"
+        )
+    ])
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.edit_message_text(message, parse_mode='Markdown', reply_markup=reply_markup)
+
+
+async def _finalize_meal_logging(query, context, meal_data, chat_id):
+    """Finalize meal logging after all items are confirmed"""
+    items = meal_data.get('items', [])
+    meal_type = meal_data.get('meal_type', 'lunch')
+    
+    # Get user profile
+    try:
+        profile = await sync_to_async(UserProfile.objects.get)(telegram_chat_id=chat_id)
+    except UserProfile.DoesNotExist:
+        await query.edit_message_text("❌ User not found. Please use /start first.")
+        return
+    
+    # Now actually log the meal
+    @sync_to_async
+    def log_confirmed_meal():
+        """Log the confirmed meal to database"""
+        try:
+            from django.utils import timezone as django_tz
+            from datetime import date as date_type
+            
+            today = date_type.today()
+            
+            # Find or create daily menu
+            daily_menu, _ = DailyMenu.objects.get_or_create(
+                date=today,
+                meal_type=meal_type,
+                defaults={}
+            )
+            
+            # Check for existing proposed plan
+            existing_plan = MealPlan.objects.filter(
+                user=profile.user,
+                daily_menu=daily_menu,
+                status='pending'
+            ).first()
+            
+            if existing_plan:
+                meal_plan = existing_plan
+                meal_plan.status = 'completed'
+                meal_plan.completed_at = django_tz.now()
+                meal_plan.explanation = f"Actual meal logged (confirmed)"
+                meal_plan.save()
+                meal_plan.mealplandish_set.all().delete()
+                plan_action = "updated"
+            else:
+                meal_plan = MealPlan.objects.create(
+                    user=profile.user,
+                    daily_menu=daily_menu,
+                    explanation=f"Actual meal logged (confirmed)",
+                    status='completed',
+                    completed_at=django_tz.now()
+                )
+                plan_action = "created"
+            
+            # Add dishes
+            found_dishes = []
+            total_nutrition = {
+                'calories': 0, 'protein': 0, 'carbs': 0,
+                'fat': 0, 'fiber': 0, 'sodium': 0, 'sugars': 0
+            }
+            
+            for item in items:
+                dish_name = item.get('name', '').strip()
+                quantity = float(item.get('quantity', 1.0))
+                
+                try:
+                    dish = Dish.objects.get(name__iexact=dish_name)
+                    
+                    MealPlanDish.objects.create(
+                        meal_plan=meal_plan,
+                        dish=dish,
+                        quantity=quantity
+                    )
+                    
+                    MealHistory.objects.create(
+                        user=profile.user,
+                        dish=dish,
+                        daily_menu=daily_menu,
+                        meal_plan=meal_plan,
+                        quantity=quantity,
+                        eaten_at=django_tz.now()
+                    )
+                    
+                    found_dishes.append({
+                        'name': dish.name,
+                        'quantity': quantity,
+                        'calories': dish.calories * quantity
+                    })
+                    
+                    total_nutrition['calories'] += dish.calories * quantity
+                    total_nutrition['protein'] += dish.protein * quantity
+                    total_nutrition['carbs'] += dish.total_carbohydrate * quantity
+                    total_nutrition['fat'] += dish.total_fat * quantity
+                    total_nutrition['fiber'] += dish.dietary_fiber * quantity
+                    total_nutrition['sodium'] += dish.sodium * quantity
+                    total_nutrition['sugars'] += dish.total_sugars * quantity
+                    
+                except Dish.DoesNotExist:
+                    logger.warning(f"Dish '{dish_name}' not found during finalization")
+            
+            return {
+                'success': True,
+                'plan_action': plan_action,
+                'meal_type': meal_type,
+                'found_dishes': found_dishes,
+                'total_nutrition': total_nutrition
+            }
+            
+        except Exception as e:
+            logger.error(f"Error finalizing meal: {e}")
+            return {'success': False, 'error': str(e)}
+    
+    result = await log_confirmed_meal()
+    
+    if not result.get('success'):
+        await query.edit_message_text(
+            f"❌ Error logging meal: {result.get('error', 'Unknown error')}"
+        )
+        context.user_data.pop('logmeal_data', None)
+        return
+    
+    # Format success message
+    meal_emoji = {
+        'breakfast': '🌅',
+        'lunch': '🌞',
+        'dinner': '🌙'
+    }
+    emoji = meal_emoji.get(result['meal_type'], '🍽️')
+    
+    message = f"{emoji} **Meal Logged** - {result['meal_type'].capitalize()}\n\n"
+    
+    if result['plan_action'] == 'updated':
+        message += "✅ Updated your proposed meal plan with what you actually ate\n\n"
+    else:
+        message += "✅ Created new meal record\n\n"
+    
+    if result['found_dishes']:
+        message += "**What you ate:**\n"
+        for item in result['found_dishes']:
+            qty_text = ""
+            if item['quantity'] == 0.5:
+                qty_text = "½ "
+            elif item['quantity'] != 1.0:
+                qty_text = f"{item['quantity']}× "
+            
+            cal_text = f" ({int(item['calories'])} cal)" if item['calories'] > 0 else ""
+            message += f"• {qty_text}{item['name']}{cal_text}\n"
+    
+    nutrition = result['total_nutrition']
+    message += f"\n📊 **Total Nutrition:**\n"
+    message += f"Calories: {int(nutrition['calories'])} kcal\n"
+    message += f"Protein: {int(nutrition['protein'])}g | "
+    message += f"Carbs: {int(nutrition['carbs'])}g | "
+    message += f"Fat: {int(nutrition['fat'])}g\n"
+    message += f"Fiber: {int(nutrition['fiber'])}g | "
+    message += f"Sodium: {int(nutrition['sodium'])}mg | "
+    message += f"Sugars: {int(nutrition['sugars'])}g"
+    
+    await query.edit_message_text(message, parse_mode='Markdown')
+    context.user_data.pop('logmeal_data', None)
 
 
 async def feedback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):

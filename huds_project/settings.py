@@ -164,7 +164,7 @@ TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN', '')
 
 # OpenAI Configuration
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY', '')
-OPENAI_MODEL = os.getenv('OPENAI_MODEL', 'gpt-5')
+OPENAI_MODEL = os.getenv('OPENAI_MODEL', 'gpt-5-nano')
 
 # Meal times (in 24-hour format)
 BREAKFAST_TIME = '06:30'
