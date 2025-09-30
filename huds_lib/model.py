@@ -154,6 +154,7 @@ def _build_generation_prompt(simplified_menu: Dict, meal_type: str, user_prefs: 
             f"Consider fiber, sodium, and added sugars limits as well.\n"
         )
 
+    # Reordered for caching: static content first, menu (semi-static), then user-specific data at end
     return (
         f"You are a helpful nutrition-focused meal planner.\n"
         f"Task: Propose a balanced {meal_header} from the provided HUDS menu by selecting 3-5 appropriate items.\n"
@@ -170,9 +171,9 @@ def _build_generation_prompt(simplified_menu: Dict, meal_type: str, user_prefs: 
         f'    {{"name": "Another Item", "quantity": "2"}}\n'
         f'  ]\n'
         f'}}\n'
-        f"{nutrition_context}"
+        f"Available menu items (select ONLY from these exact names):\n{json.dumps(simplified_menu, ensure_ascii=False, indent=2)}\n\n"
+        f"{nutrition_context}\n"
         f"User preferences and feedback: {user_prefs}\n"
-        f"Available menu items (select ONLY from these exact names):\n{json.dumps(simplified_menu, ensure_ascii=False, indent=2)}\n"
     )
 
 
@@ -309,36 +310,34 @@ def _build_final_message_prompt(meal_plan: Dict, nutrition_report: Dict, meal_ty
     """
     meal_header = meal_type.capitalize()
 
-    # Extract meal items with quantities for clearer instructions
+    # Extract meal items with quantities (no portion size suggestions)
     meal_items = []
     if meal_plan and meal_plan.get("meals"):
         for item in meal_plan["meals"]:
             name = item.get("name", "")
             quantity = item.get("quantity", "1")
-            # Format quantity for human readability with specific measurement suggestions
+            # Simple quantity formatting
             if quantity == "1" or quantity == 1:
-                # Suggest common serving measurements
-                meal_items.append(f"• {name} (1 serving - about 1 bowl, 2 scoops, or 1 portion)")
-            elif isinstance(quantity, (int, float)) and quantity > 1:
-                meal_items.append(f"• {name} ({quantity} servings - about {quantity} bowls, {quantity * 2} scoops, or {quantity} portions)")
+                meal_items.append(f"• {name} (1 portion)")
             else:
-                meal_items.append(f"• {name} ({quantity} serving(s))")
+                meal_items.append(f"• {name} ({quantity} portions)")
 
     meal_items_text = "\n".join(meal_items) if meal_items else "• Items to be determined based on your selection"
 
     return (
         f"Provide practical tips for the recommended {meal_header}. Focus on actionable suggestions, NOT justifications.\n"
+        f"IMPORTANT: Note that 1 scoop = 1 portion. Do NOT suggest portion amounts or scoop counts.\n"
         f"Include:\n"
         f"• Drink suggestions (coffee, tea, water, juice pairings)\n"
         f"• Toppings to add (honey, nuts, berries, etc.)\n"
         f"• Sides or extras available at the dining hall\n"
-        f"• Specific serving tips (e.g., '2 scoops of oatmeal', 'add a splash of milk', '3 pieces of toast')\n"
         f"• Quick prep ideas if applicable\n"
-        f"Keep it concise: 3-5 practical bullet points. No nutritional justifications.\n"
+        f"Keep it concise: 3-5 practical bullet points. No nutritional justifications. Do NOT mention portion sizes or scoop counts.\n"
         f"Do NOT include any JSON in the output. Be specific and actionable.\n"
         f"User preferences: {user_prefs}\n"
         f"Meal items with quantities:\n{meal_items_text}\n"
         f"Nutrition info: {nutrition_report.get('totals', {}).get('calories', 'N/A')} calories total\n"
+        f"Note: 1 scoop = 1 portion for all items.\n"
         f"MEAL_PLAN_JSON:\n{json.dumps(meal_plan, ensure_ascii=False)}\n"
     )
 

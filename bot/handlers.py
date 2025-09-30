@@ -1826,6 +1826,9 @@ def format_meal_plan(meal_plan):
         message += f"Sodium: {int(total_nutrition['sodium'])}mg | "
         message += f"Sugars: {int(total_nutrition['sugars'])}g\n"
         
+        # Add portion note
+        message += f"\nℹ️ Note: 1 scoop = 1 portion\n"
+        
         # Add AI suggestions if available
         if plan_data['explanation']:
             message += f"\n💡 **Tips:**\n{plan_data['explanation']}"
@@ -1927,6 +1930,9 @@ async def format_meal_plan_async(meal_plan):
         message += f"Fiber: {int(total_nutrition['fiber'])}g | "
         message += f"Sodium: {int(total_nutrition['sodium'])}mg | "
         message += f"Sugars: {int(total_nutrition['sugars'])}g\n"
+        
+        # Add portion note
+        message += f"\nℹ️ Note: 1 scoop = 1 portion\n"
         
         # Add AI suggestions if available
         if plan_data['explanation']:
