@@ -626,35 +626,27 @@ Rules:
                 defaults={}
             )
             
-            # Check if there's a pending (proposed) meal plan for this meal
-            existing_plan = MealPlan.objects.filter(
+            # Delete any existing meal plan for this user/meal combination
+            # This handles both proposed and previously completed meals
+            existing_plans = MealPlan.objects.filter(
+                user=profile.user,
+                daily_menu=daily_menu
+            )
+            
+            if existing_plans.exists():
+                plan_action = "updated"
+                existing_plans.delete()
+            else:
+                plan_action = "created"
+            
+            # Create new completed meal plan
+            meal_plan = MealPlan.objects.create(
                 user=profile.user,
                 daily_menu=daily_menu,
-                status='pending'
-            ).first()
-            
-            if existing_plan:
-                # Update existing proposed plan to completed
-                meal_plan = existing_plan
-                meal_plan.status = 'completed'
-                meal_plan.completed_at = django_tz.now()
-                meal_plan.explanation = f"Actual meal logged: {meal_description}"
-                meal_plan.save()
-                
-                # Delete old MealPlanDish entries
-                meal_plan.mealplandish_set.all().delete()
-                
-                plan_action = "updated"
-            else:
-                # Create new completed meal plan
-                meal_plan = MealPlan.objects.create(
-                    user=profile.user,
-                    daily_menu=daily_menu,
-                    explanation=f"Actual meal logged: {meal_description}",
-                    status='completed',
-                    completed_at=django_tz.now()
-                )
-                plan_action = "created"
+                explanation=f"Actual meal logged: {meal_description}",
+                status='completed',
+                completed_at=django_tz.now()
+            )
             
             # Add dishes to meal plan and create meal history
             found_dishes = []
@@ -1043,30 +1035,27 @@ async def _finalize_meal_logging(query, context, meal_data, chat_id):
                 defaults={}
             )
             
-            # Check for existing proposed plan
-            existing_plan = MealPlan.objects.filter(
+            # Delete any existing meal plan for this user/meal combination
+            # This handles both proposed and previously completed meals
+            existing_plans = MealPlan.objects.filter(
+                user=profile.user,
+                daily_menu=daily_menu
+            )
+            
+            if existing_plans.exists():
+                plan_action = "updated"
+                existing_plans.delete()
+            else:
+                plan_action = "created"
+            
+            # Create new completed meal plan
+            meal_plan = MealPlan.objects.create(
                 user=profile.user,
                 daily_menu=daily_menu,
-                status='pending'
-            ).first()
-            
-            if existing_plan:
-                meal_plan = existing_plan
-                meal_plan.status = 'completed'
-                meal_plan.completed_at = django_tz.now()
-                meal_plan.explanation = f"Actual meal logged (confirmed)"
-                meal_plan.save()
-                meal_plan.mealplandish_set.all().delete()
-                plan_action = "updated"
-            else:
-                meal_plan = MealPlan.objects.create(
-                    user=profile.user,
-                    daily_menu=daily_menu,
-                    explanation=f"Actual meal logged (confirmed)",
-                    status='completed',
-                    completed_at=django_tz.now()
-                )
-                plan_action = "created"
+                explanation=f"Actual meal logged (confirmed)",
+                status='completed',
+                completed_at=django_tz.now()
+            )
             
             # Add dishes
             found_dishes = []
