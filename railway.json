@@ -5,7 +5,7 @@
   },
   "deploy": {
     "numReplicas": 1,
-    "startCommand": "sh -c 'python manage.py migrate && python manage.py collectstatic --noinput && gunicorn --bind 0.0.0.0:$PORT --workers 3 huds_project.wsgi:application'",
+    "startCommand": "sh -c 'python manage.py migrate && python manage.py collectstatic --noinput && python manage.py create_default_superuser && gunicorn --bind 0.0.0.0:$PORT --workers 3 huds_project.wsgi:application'",
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 10
   }
