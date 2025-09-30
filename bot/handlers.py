@@ -760,7 +760,7 @@ async def meal_plan_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 async def format_meal_plan_async(meal_plan):
-    """Format a meal plan for display (async version) - concise format"""
+    """Format a meal plan for display (async version) - with full nutrition table"""
     @sync_to_async
     def get_plan_data():
         """Get all needed data from the meal plan in one sync call"""
@@ -769,6 +769,7 @@ async def format_meal_plan_async(meal_plan):
             daily_menu = meal_plan.daily_menu
             meal_type_display = daily_menu.get_meal_type_display()
             menu_date = daily_menu.date
+            explanation = meal_plan.explanation
             
             # Get dishes if they exist
             dishes_with_qty = []
@@ -780,6 +781,7 @@ async def format_meal_plan_async(meal_plan):
             return {
                 'meal_type_display': meal_type_display,
                 'menu_date': menu_date,
+                'explanation': explanation,
                 'dishes': dishes_with_qty
             }
         except Exception as e:
@@ -787,6 +789,7 @@ async def format_meal_plan_async(meal_plan):
             return {
                 'meal_type_display': 'Meal',
                 'menu_date': 'Unknown',
+                'explanation': '',
                 'dishes': []
             }
     
@@ -802,9 +805,19 @@ async def format_meal_plan_async(meal_plan):
     
     message = f"{emoji} **{plan_data['meal_type_display']}** - {plan_data['menu_date']}\n\n"
     
-    # Only show dish list if there are actual dishes linked
+    # Show dishes
     if plan_data['dishes']:
-        total_cals = 0
+        # Calculate totals
+        total_nutrition = {
+            'calories': 0,
+            'protein': 0,
+            'carbs': 0,
+            'fat': 0,
+            'fiber': 0,
+            'sodium': 0,
+            'sugars': 0
+        }
+        
         for item in plan_data['dishes']:
             # More descriptive quantity formatting
             if item.quantity == 1.0:
@@ -819,11 +832,30 @@ async def format_meal_plan_async(meal_plan):
             cals = int(item.dish.calories * item.quantity) if item.dish.calories > 0 else 0
             if cals > 0:
                 message += f"• {qty_text}{item.dish.name} ({cals} cal)\n"
-                total_cals += cals
             else:
                 message += f"• {qty_text}{item.dish.name}\n"
+            
+            # Add to totals
+            total_nutrition['calories'] += item.dish.calories * item.quantity
+            total_nutrition['protein'] += item.dish.protein * item.quantity
+            total_nutrition['carbs'] += item.dish.total_carbohydrate * item.quantity
+            total_nutrition['fat'] += item.dish.total_fat * item.quantity
+            total_nutrition['fiber'] += item.dish.dietary_fiber * item.quantity
+            total_nutrition['sodium'] += item.dish.sodium * item.quantity
+            total_nutrition['sugars'] += item.dish.total_sugars * item.quantity
         
-        if total_cals > 0:
-            message += f"\n📊 Total: ~{total_cals} calories"
+        # Add nutritional breakdown table
+        message += f"\n📊 **Nutrition:**\n"
+        message += f"Calories: {int(total_nutrition['calories'])} kcal\n"
+        message += f"Protein: {int(total_nutrition['protein'])}g | "
+        message += f"Carbs: {int(total_nutrition['carbs'])}g | "
+        message += f"Fat: {int(total_nutrition['fat'])}g\n"
+        message += f"Fiber: {int(total_nutrition['fiber'])}g | "
+        message += f"Sodium: {int(total_nutrition['sodium'])}mg | "
+        message += f"Sugars: {int(total_nutrition['sugars'])}g\n"
+        
+        # Add AI suggestions if available
+        if plan_data['explanation']:
+            message += f"\n💡 **Tips:**\n{plan_data['explanation']}"
     
     return message
