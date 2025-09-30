@@ -7,14 +7,14 @@ from .models import UserProfile, MealPlan, MealPlanDish, MealHistory, UserFeedba
 
 @admin.register(UserProfile)
 class UserProfileAdmin(admin.ModelAdmin):
-    list_display = ['user', 'telegram_username', 'telegram_chat_id', 'notifications_enabled', 'created_at']
-    list_filter = ['notifications_enabled', 'breakfast_notification', 'lunch_notification', 'dinner_notification']
+    list_display = ['user', 'telegram_username', 'telegram_chat_id', 'is_admin', 'notifications_enabled', 'created_at']
+    list_filter = ['is_admin', 'notifications_enabled', 'breakfast_notification', 'lunch_notification', 'dinner_notification']
     search_fields = ['user__username', 'telegram_username', 'telegram_chat_id']
     readonly_fields = ['created_at', 'updated_at']
     
     fieldsets = (
         ('User Information', {
-            'fields': ('user', 'telegram_chat_id', 'telegram_username')
+            'fields': ('user', 'telegram_chat_id', 'telegram_username', 'is_admin')
         }),
         ('Nutritional Goals', {
             'fields': (
