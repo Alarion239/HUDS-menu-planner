@@ -658,31 +658,47 @@ Rules:
         )
     else:
         feedbacks_created = result.get('feedbacks_created', 0)
-        dishes = result.get('dishes_processed', [])
+        dishes_saved = result.get('dishes_saved', [])
+        dishes_not_found = result.get('dishes_not_found', [])
         prefs_updated = result.get('prefs_updated', False)
         general_prefs = result.get('general_preferences', '')
         
+        message = ""
+        
         if feedbacks_created > 0:
-            dishes_text = ', '.join(dishes)
+            dishes_text = '\n• '.join(dishes_saved)
             message = f"✅ Thank you! I've saved your feedback about:\n• {dishes_text}\n\n"
             if prefs_updated and general_prefs:
                 message += f"I also noted your preference: {general_prefs}\n\n"
             message += "I'll use this to improve your future meal recommendations!"
-            await update.message.reply_text(message)
-        elif prefs_updated and general_prefs:
-            await update.message.reply_text(
-                f"✅ Got it! I've added your preference:\n• {general_prefs}\n\n"
-                f"I'll prioritize this in your next meal plan.\n"
-                f"Use /nextmeal to generate a new plan with this preference!"
-            )
-        else:
-            await update.message.reply_text(
-                "✅ Thank you for your feedback! I've noted your comments.\n\n"
-                "💡 Tip: For better results, try:\n"
-                "• Rating specific dishes: \"The scrambled eggs were amazing!\"\n"
-                "• Stating preferences: \"I want more protein\" or \"I love oatmeal\"\n"
-                "• Mentioning dislikes: \"No strawberries please\""
-            )
+            
+        if dishes_not_found:
+            if message:
+                message += "\n\n"
+            message += "⚠️ I couldn't find these dishes in the menu:\n"
+            for item in dishes_not_found:
+                message += f"• {item['attempted']}\n"
+                if item['suggestions']:
+                    suggestions_text = ', '.join(item['suggestions'][:2])
+                    message += f"  Did you mean: {suggestions_text}?\n"
+            
+        if not message:
+            if prefs_updated and general_prefs:
+                message = (
+                    f"✅ Got it! I've added your preference:\n• {general_prefs}\n\n"
+                    f"I'll prioritize this in your next meal plan.\n"
+                    f"Use /nextmeal to generate a new plan with this preference!"
+                )
+            else:
+                message = (
+                    "✅ Thank you for your feedback! I've noted your comments.\n\n"
+                    "💡 Tip: For better results, try:\n"
+                    "• Rating specific dishes: \"The scrambled eggs were amazing!\"\n"
+                    "• Stating preferences: \"I want more protein\" or \"I love oatmeal\"\n"
+                    "• Mentioning dislikes: \"No strawberries please\""
+                )
+        
+        await update.message.reply_text(message)
 
 
 async def meal_plan_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
