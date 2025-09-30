@@ -1,0 +1,28 @@
+# Django and core dependencies
+Django==4.2.7
+psycopg2-binary==2.9.9
+gunicorn==21.2.0
+
+# Celery for task scheduling
+celery==5.3.4
+redis==5.0.1
+django-celery-beat==2.5.0
+
+# Telegram bot
+python-telegram-bot==20.7
+
+# Web scraping (from HUDS_MVP)
+requests==2.31.0
+beautifulsoup4==4.12.2
+
+# OpenAI for meal planning
+openai==1.3.7
+
+# Environment variables
+python-dotenv==1.0.0
+
+# Timezone support
+pytz==2023.3
+
+# Django REST framework (optional, for future API)
+djangorestframework==3.14.0
