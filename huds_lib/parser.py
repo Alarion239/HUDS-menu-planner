@@ -327,17 +327,24 @@ def _extract_nutrition_facts(soup: BeautifulSoup) -> Dict:
 
 
 def _extract_structured_nutrition(main_table: BeautifulSoup) -> Dict:
-    """Extract nutrition facts from the structured nutrition table"""
+    """Extract nutrition facts from the structured nutrition table (main panel only)"""
     nutrition = {}
     
     # Find all table rows within the main table
-    rows = main_table.find_all('tr')
+    rows = main_table.find_all('tr', recursive=False)
     
-    for row in rows:
+    # We only want to process the first ~6-7 rows which contain the main nutrition panel
+    # The rest is a summary table that has duplicate/inconsistent data
+    # Look for rows that have either the left nutrition facts panel or the right side nutrients
+    for row in rows[:10]:  # Limit to first 10 rows to avoid the summary table
         cells = row.find_all('td')
         
         # Look for rows with nutrition information
         for cell in cells:
+            # Skip cells that contain <li> tags (those are from the summary table)
+            if cell.find('li'):
+                continue
+                
             nutrition_spans = cell.find_all('span', class_='nutfactstopnutrient')
             
             # Process pairs of spans (amount and daily value)
