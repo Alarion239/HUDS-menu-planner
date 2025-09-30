@@ -10,6 +10,7 @@ from bot.handlers import (
     start_command,
     help_command,
     nextmeal_command,
+    logmeal_command,
     preferences_command,
     goals_command,
     today_command,
@@ -49,6 +50,7 @@ class Command(BaseCommand):
         application.add_handler(CommandHandler("start", start_command))
         application.add_handler(CommandHandler("help", help_command))
         application.add_handler(CommandHandler("nextmeal", nextmeal_command))
+        application.add_handler(CommandHandler("logmeal", logmeal_command))
         application.add_handler(CommandHandler("preferences", preferences_command))
         application.add_handler(CommandHandler("goals", goals_command))
         application.add_handler(CommandHandler("today", today_command))

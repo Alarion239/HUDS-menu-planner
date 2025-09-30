@@ -81,6 +81,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "**Commands:**\n"
         "/start - Register or re-register\n"
         "/nextmeal - Generate next meal plan now\n"
+        "/logmeal - Log what you actually ate (free-form text)\n"
         "/preferences - Update dietary restrictions\n"
         "/goals - Set nutritional goals\n"
         "/today - Get today's meal plans\n"
@@ -88,11 +89,12 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/history - View meal history\n"
         "/help - Show this message\n\n"
         "**Meal Times:**\n"
-        "🌅 Breakfast: 6:30 AM\n"
-        "🌞 Lunch: 10:30 AM\n"
-        "🌙 Dinner: 3:30 PM\n\n"
+        "🌅 Breakfast: 7:30 AM to 10:30 AM\n"
+        "🌞 Lunch: 11:30 AM to 2:00 PM\n"
+        "🌙 Dinner: 4:30 PM to 7:30 PM\n\n"
         "I'll send you personalized meal plans before each meal!\n"
-        "Or use /nextmeal to generate one on demand."
+        "Or use /nextmeal to generate one on demand.\n"
+        "After eating, use /logmeal to track what you actually ate."
     )
     
     if is_admin:
@@ -243,28 +245,31 @@ async def nextmeal_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     
-    # Determine next meal
+    # Determine which meal to generate based on current time
     now = datetime.now()
     today = now.date()
     current_time = now.time()
     
-    # Parse meal times from settings
-    breakfast_time = time.fromisoformat(settings.BREAKFAST_TIME)
-    lunch_time = time.fromisoformat(settings.LUNCH_TIME)
-    dinner_time = time.fromisoformat(settings.DINNER_TIME)
+    # Time-based meal determination:
+    # Before 11:00 → Breakfast
+    # 11:00 - 15:00 → Lunch
+    # 15:00 - 22:00 → Dinner
+    # After 22:00 → Next day's breakfast
     
-    # Determine which meal is next
-    if current_time < breakfast_time:
+    if current_time < time(11, 0):
+        # Before 11 AM → Breakfast
         next_meal = 'breakfast'
         meal_date = today
-    elif current_time < lunch_time:
+    elif current_time < time(15, 0):
+        # 11 AM - 3 PM → Lunch
         next_meal = 'lunch'
         meal_date = today
-    elif current_time < dinner_time:
+    elif current_time < time(22, 0):
+        # 3 PM - 10 PM → Dinner
         next_meal = 'dinner'
         meal_date = today
     else:
-        # After dinner, next meal is tomorrow's breakfast
+        # After 10 PM → Tomorrow's breakfast
         from datetime import timedelta
         next_meal = 'breakfast'
         meal_date = today + timedelta(days=1)
@@ -467,6 +472,311 @@ async def nextmeal_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"❌ Error generating meal plan.\n"
             f"Please try again later."
         )
+
+
+async def logmeal_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /logmeal command - log actual meal eaten using free-form text"""
+    chat_id = update.effective_chat.id
+    
+    try:
+        profile = await sync_to_async(UserProfile.objects.get)(telegram_chat_id=chat_id)
+    except UserProfile.DoesNotExist:
+        await update.message.reply_text(
+            "❌ Please use /start first to register!"
+        )
+        return
+    
+    # Get the meal description from the message
+    if not context.args:
+        await update.message.reply_text(
+            "📝 **Log Your Meal**\n\n"
+            "Describe what you ate in free-form text. I'll parse it and track the nutrition!\n\n"
+            "**Examples:**\n"
+            "• `/logmeal I ate a chicken breast and a side salad`\n"
+            "• `/logmeal Half a waffle with strawberries and yogurt`\n"
+            "• `/logmeal Two slices of pizza and a coke`\n\n"
+            "I'll match items to HUDS menu dishes and calculate your nutrition.",
+            parse_mode='Markdown'
+        )
+        return
+    
+    meal_description = ' '.join(context.args)
+    
+    # Send processing message
+    processing_msg = await update.message.reply_text(
+        "🤔 Analyzing your meal..."
+    )
+    
+    # Determine which meal this is for (based on current time)
+    now = datetime.now()
+    today = now.date()
+    current_time = now.time()
+    
+    # Determine meal type based on time
+    if current_time < time(11, 0):
+        meal_type = 'breakfast'
+    elif current_time < time(15, 0):
+        meal_type = 'lunch'
+    else:
+        meal_type = 'dinner'
+    
+    # Process the meal description using AI
+    @sync_to_async
+    def parse_and_log_meal():
+        """Parse meal description and create meal records"""
+        try:
+            sys.path.insert(0, os.path.join(settings.BASE_DIR, 'huds_lib'))
+            from openai import OpenAI
+            
+            client = OpenAI(api_key=settings.OPENAI_API_KEY)
+            
+            # Get available dishes from recent menus (last 7 days)
+            from datetime import timedelta
+            from django.utils import timezone as django_tz
+            seven_days_ago = django_tz.now() - timedelta(days=7)
+            
+            recent_dishes = Dish.objects.filter(
+                menus__date__gte=seven_days_ago
+            ).distinct().values_list('name', flat=True).order_by('name')[:300]
+            
+            available_dishes_list = "\n".join([f"- {dish}" for dish in recent_dishes])
+            
+            # Ask GPT to extract dish names and quantities
+            prompt = f"""Parse this meal description and extract the dishes and quantities eaten.
+
+User said: "{meal_description}"
+
+Available HUDS dishes (use EXACT names from this list):
+{available_dishes_list}
+
+Extract:
+1. Each dish mentioned (use EXACT dish name from the list)
+2. The quantity (default to 1.0 if not specified)
+   - "half" = 0.5
+   - "two" or "2" = 2.0
+   - no quantity mentioned = 1.0
+3. Brief note if dish isn't in the list
+
+Return ONLY valid JSON:
+{{
+  "items": [
+    {{"name": "Exact Dish Name", "quantity": 1.0}},
+    {{"name": "Another Dish", "quantity": 0.5}}
+  ],
+  "unknown_items": [
+    {{"description": "item user mentioned but not in HUDS list", "assumed_name": "closest match or generic name"}}
+  ]
+}}
+
+Rules:
+- ONLY use exact dish names from the provided list
+- Parse quantities from text (half=0.5, two=2.0, etc.)
+- If dish not in list, add to unknown_items
+- Default quantity is 1.0"""
+            
+            model_name = getattr(settings, 'OPENAI_MODEL', 'gpt-5')
+            
+            response = client.chat.completions.create(
+                model=model_name,
+                messages=[
+                    {"role": "system", "content": "You are a helpful assistant that outputs only valid JSON."},
+                    {"role": "user", "content": prompt}
+                ]
+            )
+            
+            result = response.choices[0].message.content
+            
+            # Parse JSON response
+            import json
+            try:
+                data = json.loads(result)
+            except json.JSONDecodeError:
+                # Try to extract JSON from response
+                import re
+                json_match = re.search(r'\{[\s\S]*\}', result)
+                if json_match:
+                    data = json.loads(json_match.group(0))
+                else:
+                    raise ValueError("Could not extract valid JSON from AI response")
+            
+            items = data.get('items', [])
+            unknown_items = data.get('unknown_items', [])
+            
+            # Find or create today's daily menu for this meal
+            daily_menu, _ = DailyMenu.objects.get_or_create(
+                date=today,
+                meal_type=meal_type,
+                defaults={}
+            )
+            
+            # Check if there's a pending (proposed) meal plan for this meal
+            existing_plan = MealPlan.objects.filter(
+                user=profile.user,
+                daily_menu=daily_menu,
+                status='pending'
+            ).first()
+            
+            if existing_plan:
+                # Update existing proposed plan to completed
+                meal_plan = existing_plan
+                meal_plan.status = 'completed'
+                meal_plan.completed_at = django_tz.now()
+                meal_plan.explanation = f"Actual meal logged: {meal_description}"
+                meal_plan.save()
+                
+                # Delete old MealPlanDish entries
+                meal_plan.mealplandish_set.all().delete()
+                
+                plan_action = "updated"
+            else:
+                # Create new completed meal plan
+                meal_plan = MealPlan.objects.create(
+                    user=profile.user,
+                    daily_menu=daily_menu,
+                    explanation=f"Actual meal logged: {meal_description}",
+                    status='completed',
+                    completed_at=django_tz.now()
+                )
+                plan_action = "created"
+            
+            # Add dishes to meal plan and create meal history
+            found_dishes = []
+            not_found_dishes = []
+            total_nutrition = {
+                'calories': 0,
+                'protein': 0,
+                'carbs': 0,
+                'fat': 0,
+                'fiber': 0,
+                'sodium': 0,
+                'sugars': 0
+            }
+            
+            for item in items:
+                dish_name = item.get('name', '').strip()
+                quantity = float(item.get('quantity', 1.0))
+                
+                if not dish_name:
+                    continue
+                
+                # Try to find the dish (case-insensitive)
+                try:
+                    dish = Dish.objects.get(name__iexact=dish_name)
+                    
+                    # Create MealPlanDish entry
+                    MealPlanDish.objects.create(
+                        meal_plan=meal_plan,
+                        dish=dish,
+                        quantity=quantity
+                    )
+                    
+                    # Create MealHistory entry
+                    MealHistory.objects.create(
+                        user=profile.user,
+                        dish=dish,
+                        daily_menu=daily_menu,
+                        meal_plan=meal_plan,
+                        quantity=quantity,
+                        eaten_at=django_tz.now()
+                    )
+                    
+                    found_dishes.append({
+                        'name': dish.name,
+                        'quantity': quantity,
+                        'calories': dish.calories * quantity
+                    })
+                    
+                    # Add to nutrition totals
+                    total_nutrition['calories'] += dish.calories * quantity
+                    total_nutrition['protein'] += dish.protein * quantity
+                    total_nutrition['carbs'] += dish.total_carbohydrate * quantity
+                    total_nutrition['fat'] += dish.total_fat * quantity
+                    total_nutrition['fiber'] += dish.dietary_fiber * quantity
+                    total_nutrition['sodium'] += dish.sodium * quantity
+                    total_nutrition['sugars'] += dish.total_sugars * quantity
+                    
+                    logger.info(f"Logged meal: {dish.name} x{quantity} for {profile.user.username}")
+                    
+                except Dish.DoesNotExist:
+                    not_found_dishes.append({
+                        'name': dish_name,
+                        'quantity': quantity
+                    })
+                    logger.warning(f"Dish '{dish_name}' not found for meal logging")
+            
+            return {
+                'success': True,
+                'plan_action': plan_action,
+                'meal_type': meal_type,
+                'found_dishes': found_dishes,
+                'not_found_dishes': not_found_dishes,
+                'unknown_items': unknown_items,
+                'total_nutrition': total_nutrition
+            }
+            
+        except Exception as e:
+            logger.error(f"Error parsing meal: {e}")
+            return {'success': False, 'error': str(e)}
+    
+    result = await parse_and_log_meal()
+    
+    if not result.get('success'):
+        await processing_msg.edit_text(
+            f"❌ Sorry, I had trouble processing your meal:\n{result.get('error', 'Unknown error')}\n\n"
+            "Please try again or contact support."
+        )
+        return
+    
+    # Format the response
+    meal_emoji = {
+        'breakfast': '🌅',
+        'lunch': '🌞',
+        'dinner': '🌙'
+    }
+    emoji = meal_emoji.get(result['meal_type'], '🍽️')
+    
+    message = f"{emoji} **Meal Logged** - {result['meal_type'].capitalize()}\n\n"
+    
+    if result['plan_action'] == 'updated':
+        message += "✅ Updated your proposed meal plan with what you actually ate\n\n"
+    else:
+        message += "✅ Created new meal record\n\n"
+    
+    # List found dishes
+    if result['found_dishes']:
+        message += "**What you ate:**\n"
+        for item in result['found_dishes']:
+            qty_text = ""
+            if item['quantity'] == 0.5:
+                qty_text = "½ "
+            elif item['quantity'] != 1.0:
+                qty_text = f"{item['quantity']}× "
+            
+            cal_text = f" ({int(item['calories'])} cal)" if item['calories'] > 0 else ""
+            message += f"• {qty_text}{item['name']}{cal_text}\n"
+    
+    # Show nutrition totals
+    nutrition = result['total_nutrition']
+    message += f"\n📊 **Total Nutrition:**\n"
+    message += f"Calories: {int(nutrition['calories'])} kcal\n"
+    message += f"Protein: {int(nutrition['protein'])}g | "
+    message += f"Carbs: {int(nutrition['carbs'])}g | "
+    message += f"Fat: {int(nutrition['fat'])}g\n"
+    message += f"Fiber: {int(nutrition['fiber'])}g | "
+    message += f"Sodium: {int(nutrition['sodium'])}mg | "
+    message += f"Sugars: {int(nutrition['sugars'])}g"
+    
+    # Warn about not found dishes
+    if result['not_found_dishes']:
+        message += "\n\n⚠️ **Couldn't find:**\n"
+        for item in result['not_found_dishes']:
+            message += f"• {item['name']}\n"
+        message += "\nThese weren't included in nutrition totals."
+    
+    if result['unknown_items']:
+        message += "\n\nℹ️ Some items weren't in the HUDS menu database."
+    
+    await processing_msg.edit_text(message, parse_mode='Markdown')
 
 
 async def feedback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):

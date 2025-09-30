@@ -145,7 +145,7 @@ TIME_ZONE=America/New_York
    - Connect to the same GitHub repository
    
    **Deploy Section:**
-   - **Start Command**: `python manage.py run_telegram_bot`
+   - **Start Command**: `Capython manage.py run_telegram_bot`
    
 4. Go to **Variables** tab and add **the same environment variables** as above
 
