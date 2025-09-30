@@ -330,8 +330,8 @@ def _extract_structured_nutrition(main_table: BeautifulSoup) -> Dict:
     """Extract nutrition facts from the structured nutrition table (main panel only)"""
     nutrition = {}
     
-    # Find all table rows within the main table
-    rows = main_table.find_all('tr', recursive=False)
+    # Find all table rows within the main table (rows are typically inside <tbody>)
+    rows = main_table.find_all('tr')
     
     # We only want to process the first ~6-7 rows which contain the main nutrition panel
     # The rest is a summary table that has duplicate/inconsistent data
@@ -388,17 +388,18 @@ def _parse_structured_nutrition_text(text: str) -> Optional[tuple]:
     text_no_bold = re.sub(r'</?b>', '', text).replace('&nbsp;', ' ').strip()
     
     # Pattern to match various nutrition fact formats
+    # Note: Using -?\d+(?:\.\d+)? instead of [\d.-]+ to avoid matching periods from names like "Total Carbohydrate."
     patterns = [
-        # "Total Fat10g" (no space between name and amount - common when bold tags are removed)
-        r'^(.+?)([\d.-]+(?:\.\d+)?[a-zA-Z]+)$',
+        # "Total Fat10g" or "Total Carbohydrate.20.7g" (no space, may have trailing period on name)
+        r'^(.+?)\.?(-?\d+(?:\.\d+)?[a-zA-Z]+)$',
         # "<b>Total Fat&nbsp;</b>10g" (with bold tags and nbsp)
-        r'^<b>(.+?)(?:&nbsp;|\s)*</b>\s*([\d.-]+(?:\.\d+)?[a-zA-Z]+)$',
+        r'^<b>(.+?)(?:&nbsp;|\s)*</b>\s*(-?\d+(?:\.\d+)?[a-zA-Z]+)$',
         # "<b>Total Fat </b>10g" (with bold tags)
-        r'^<b>(.+?)\s*</b>\s*([\d.-]+(?:\.\d+)?[a-zA-Z]+)$',
+        r'^<b>(.+?)\s*</b>\s*(-?\d+(?:\.\d+)?[a-zA-Z]+)$',
         # "Total Fat 10g" (with space)
-        r'^(.+?)\s+([\d.-]+(?:\.\d+)?[a-zA-Z]+)$',
+        r'^(.+?)\s+(-?\d+(?:\.\d+)?[a-zA-Z]+)$',
         # "    Saturated Fat 3g" (with indentation)
-        r'^\s*(.+?)\s+([\d.-]+(?:\.\d+)?[a-zA-Z]+)$'
+        r'^\s*(.+?)\s+(-?\d+(?:\.\d+)?[a-zA-Z]+)$'
     ]
     
     # Try patterns on both original and cleaned text
