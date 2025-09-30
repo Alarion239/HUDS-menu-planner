@@ -98,7 +98,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if is_admin:
         message += (
             "\n\n**Admin Commands:**\n"
-            "/fetch - Manually fetch menus for a date\n"
+            "/fetch - Manually fetch menus (interactive date picker)\n"
             "/stats - View system statistics"
         )
     
@@ -776,6 +776,87 @@ async def meal_plan_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         )
 
 
+async def fetch_date_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle date selection callback for /fetch command"""
+    query = update.callback_query
+    await query.answer()
+    
+    chat_id = update.effective_chat.id
+    
+    # Check if user is admin
+    try:
+        profile = await sync_to_async(UserProfile.objects.get)(telegram_chat_id=chat_id)
+    except UserProfile.DoesNotExist:
+        await query.edit_message_text("❌ Please use /start first to register!")
+        return
+    
+    if not profile.is_admin:
+        await query.edit_message_text("❌ This command is only available to admins.")
+        return
+    
+    # Parse the date from callback data
+    from datetime import date as date_type
+    callback_data = query.data
+    
+    if not callback_data.startswith('fetch_date:'):
+        await query.edit_message_text("❌ Invalid callback data")
+        return
+    
+    date_str = callback_data.replace('fetch_date:', '')
+    try:
+        fetch_date = date_type.fromisoformat(date_str)
+    except ValueError:
+        await query.edit_message_text("❌ Invalid date format")
+        return
+    
+    # Edit the message to show fetch is starting
+    await query.edit_message_text(
+        f"🔄 Fetching menus for {fetch_date.strftime('%A, %B %d, %Y')}..."
+    )
+    
+    # Execute the fetch using the query.message
+    await _execute_fetch_for_callback(query, fetch_date)
+
+
+async def _execute_fetch_for_callback(query, fetch_date):
+    """Execute the menu fetch for a callback query"""
+    import sys
+    import os
+    
+    try:
+        # Import and run the fetch task
+        sys.path.insert(0, os.path.join(settings.BASE_DIR, 'menu'))
+        from menu.tasks import fetch_tomorrow_menus
+        
+        @sync_to_async
+        def run_fetch_task():
+            # Call the Celery task synchronously for admin command
+            return fetch_tomorrow_menus(target_date=fetch_date)
+        
+        result = await run_fetch_task()
+        
+        if result.get('status') == 'success':
+            stats = result.get('stats', {})
+            message = (
+                f"✅ Successfully fetched menus for {fetch_date.strftime('%A, %B %d, %Y')}\n\n"
+                f"📊 Stats:\n"
+                f"• Breakfast: {stats.get('breakfast', 0)} dishes\n"
+                f"• Lunch: {stats.get('lunch', 0)} dishes\n"
+                f"• Dinner: {stats.get('dinner', 0)} dishes\n"
+                f"• Total: {stats.get('total', 0)} dishes"
+            )
+        else:
+            message = f"⚠️ Fetch completed with warnings:\n{result.get('message', 'Unknown status')}"
+        
+        await query.edit_message_text(message)
+        
+    except Exception as e:
+        logger.error(f"Error in fetch date callback: {e}")
+        await query.edit_message_text(
+            f"❌ Error fetching menus:\n{str(e)}"
+        )
+
+
 async def fetch_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /fetch command - admin only, manually fetch menus"""
     chat_id = update.effective_chat.id
@@ -791,7 +872,7 @@ async def fetch_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ This command is only available to admins.")
         return
     
-    # Parse date argument or use tomorrow
+    # Parse date argument or show date picker
     from datetime import date, timedelta
     import sys
     import os
@@ -821,10 +902,43 @@ async def fetch_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
     else:
-        # Default to tomorrow
-        fetch_date = date.today() + timedelta(days=1)
+        # Show interactive date picker
+        today = date.today()
+        keyboard = []
+        
+        # Create buttons for the next 7 days
+        for i in range(7):
+            target_date = today + timedelta(days=i)
+            if i == 0:
+                label = f"📅 Today ({target_date.strftime('%m/%d')})"
+            elif i == 1:
+                label = f"📅 Tomorrow ({target_date.strftime('%m/%d')})"
+            else:
+                label = f"📅 {target_date.strftime('%A, %m/%d')}"
+            
+            keyboard.append([
+                InlineKeyboardButton(label, callback_data=f"fetch_date:{target_date.isoformat()}")
+            ])
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.message.reply_text(
+            "📅 Select a date to fetch menus:\n\n"
+            "Or use: `/fetch YYYY-MM-DD` for a specific date",
+            reply_markup=reply_markup
+        )
+        return
     
-    status_msg = await update.message.reply_text(
+    # Proceed with fetch if date was provided
+    await _execute_fetch(update.message, fetch_date)
+
+
+async def _execute_fetch(message, fetch_date):
+    """Execute the menu fetch for a specific date"""
+    from datetime import date, timedelta
+    import sys
+    import os
+    
+    status_msg = await message.reply_text(
         f"🔄 Fetching menus for {fetch_date}..."
     )
     

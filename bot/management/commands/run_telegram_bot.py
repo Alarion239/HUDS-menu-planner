@@ -17,6 +17,7 @@ from bot.handlers import (
     feedback_handler,
     meal_plan_callback,
     fetch_command,
+    fetch_date_callback,
     stats_command,
 )
 
@@ -57,8 +58,9 @@ class Command(BaseCommand):
         application.add_handler(CommandHandler("fetch", fetch_command))
         application.add_handler(CommandHandler("stats", stats_command))
         
-        # Register callback handler for meal plan buttons
-        application.add_handler(CallbackQueryHandler(meal_plan_callback))
+        # Register callback handlers with pattern matching
+        application.add_handler(CallbackQueryHandler(fetch_date_callback, pattern=r'^fetch_date:'))
+        application.add_handler(CallbackQueryHandler(meal_plan_callback, pattern=r'^(accept|modify)_'))
         
         # Register message handler for feedback
         application.add_handler(MessageHandler(
