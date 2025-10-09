@@ -1,29 +1,18 @@
 # HUDS Menu Planning System - Project Summary
 
-## ✅ Project Complete
+## ✅ Project Status: Production Ready
 
-A fully Dockerized Django application with PostgreSQL database, Nginx server, Celery task scheduling, and Telegram bot interface for personalized HUDS menu planning.
+A fully functional Django application deployed on Railway with PostgreSQL, Redis, Celery scheduling, and Telegram bot interface for personalized HUDS menu planning.
 
 ## 📁 Project Structure
 
 ```
 HUDS/
-├── docker-compose.yml          # Multi-container orchestration
-├── Dockerfile                  # Python/Django container definition
-├── nginx.conf                  # Nginx reverse proxy config
-├── requirements.txt            # Python dependencies
-├── env.example                 # Environment variables template
-├── manage.py                   # Django management script
-├── README.md                   # Full documentation
-├── QUICKSTART.md              # Setup instructions
-│
 ├── huds_project/              # Django project
-│   ├── __init__.py
-│   ├── settings.py            # Configuration (✅ customized)
+│   ├── settings.py            # Configuration (Railway + Docker compatible)
 │   ├── celery.py              # Celery configuration
-│   ├── urls.py
-│   ├── wsgi.py
-│   └── asgi.py
+│   ├── urls.py                # URL routing
+│   └── wsgi.py                # WSGI application
 │
 ├── huds_lib/                  # HUDS scraping library
 │   ├── webpage.py             # URL generation
@@ -32,65 +21,112 @@ HUDS/
 │
 ├── menu/                      # Menu management app
 │   ├── models.py              # Dish & DailyMenu models
-│   ├── admin.py               # Admin interface config
+│   ├── admin.py               # Admin interface
 │   ├── tasks.py               # Celery tasks (fetch menus)
-│   ├── management/
-│   │   └── commands/
-│   │       └── fetch_daily_menu.py  # CLI command
-│   └── migrations/
+│   └── management/commands/
+│       ├── fetch_daily_menu.py       # CLI: Fetch menus
+│       └── setup_periodic_tasks.py   # CLI: Auto-setup Celery Beat tasks
 │
 ├── users/                     # User management app
 │   ├── models.py              # UserProfile, MealPlan, MealHistory, UserFeedback
-│   ├── admin.py               # Admin interface config
+│   ├── admin.py               # Admin interface
 │   ├── tasks.py               # Celery tasks (generate & send plans)
-│   └── migrations/
+│   └── management/commands/
+│       └── create_default_superuser.py  # CLI: Auto-create admin user
 │
-└── bot/                       # Telegram bot app
-    ├── handlers.py            # Bot command handlers
-    └── management/
-        └── commands/
-            └── run_telegram_bot.py  # Bot runner
+├── bot/                       # Telegram bot app
+│   ├── handlers.py            # Bot command handlers
+│   └── management/commands/
+│       └── run_telegram_bot.py  # Bot runner
+│
+├── docker-compose.yml         # Local development orchestration
+├── Dockerfile                 # Container definition
+├── Procfile                   # Railway process definitions
+├── requirements.txt           # Python dependencies
+└── env.example                # Environment variables template
 ```
 
-## 🎯 Implemented Features
+## 🎯 Core Features
 
-### 1. Data Fetching (✅ Complete)
-- **Automated scraping**: Nightly fetches of HUDS menus
-- **Nutritional data**: Comprehensive nutrition info for all dishes
+### 1. Automated Menu Fetching ✅
+- **Nightly task**: Fetches next day's breakfast, lunch, dinner at 11 PM
+- **Nutritional data**: Complete nutrition facts for all dishes
 - **Database storage**: Efficient PostgreSQL schema with proper indexing
-- **Management command**: `python manage.py fetch_daily_menu`
+- **Admin control**: `/fetch` command with interactive date picker
 
-### 2. Database Models (✅ Complete)
+### 2. AI-Powered Meal Planning ✅
+- **OpenAI Integration**: Uses GPT-4 for intelligent meal recommendations
+- **Context-aware**: Considers user preferences, goals, and feedback history
+- **Time-based generation**: `/nextmeal` auto-detects meal type by time:
+  - Before 11 AM → Breakfast
+  - 11 AM - 3 PM → Lunch
+  - 3 PM - 10 PM → Dinner
+  - After 10 PM → Next day's breakfast
+- **Automated delivery**: Sends plans at 6:30 AM, 10:30 AM, 3:30 PM
+
+### 3. Meal Logging ✅
+- **Free-form input**: `/logmeal I ate chicken and salad`
+- **AI parsing**: Extracts dishes, quantities, meal type
+- **Smart matching**: Matches to HUDS menu items
+- **Nutrition tracking**: Calculates total calories and macros
+- **Replaces proposals**: Updates proposed plans with actual consumption
+
+### 4. Feedback System ✅
+- **Easy input**: Reply to any meal plan message
+- **AI extraction**: Determines rating (-2 to +2) from natural language
+- **Time-weighted**: Recent feedback has more influence
+- **Adaptive learning**: Improves recommendations over time
+- **Decay rates**: Different half-lives based on rating intensity
+
+### 5. Telegram Bot Interface ✅
+
+#### User Commands
+- `/start` - Register with automatic profile creation
+- `/nextmeal` - Generate meal plan (time-aware)
+- `/logmeal <text>` - Log actual meals with AI parsing
+- `/preferences` - Set dietary restrictions
+- `/goals` - Update nutritional targets
+- `/today` - View today's meal plans
+- `/feedback` - Reply to dishes for ratings
+- `/history` - Review meal history
+- `/help` - Show command list
+
+#### Admin Commands
+- `/fetch` - Interactive date picker for manual menu fetching
+- `/stats` - System statistics and monitoring
+
+### 6. Database Models ✅
 
 #### menu.Dish
 - Stores dish name, category, portion size
 - 14+ nutritional fields (all floats, default 0.0)
 - Ingredients list
-- First/last seen tracking
+- First/last seen date tracking
 
 #### menu.DailyMenu
-- Date + meal type (breakfast/lunch/dinner)
-- Many-to-many with dishes
-- Unique constraint prevents duplicates
+- Links dishes to specific date + meal type
+- Unique constraint on (date, meal_type)
+- Many-to-many relationship with dishes
 
 #### users.UserProfile
-- Extends Django User
+- Extends Django User model
 - Telegram integration (chat_id, username)
 - Nutritional goals (calories, protein, carbs, fat, fiber, sodium, sugars)
-- Dietary restrictions and preferences (free text)
+- Dietary restrictions and preferences
 - Notification settings per meal
+- Admin flag for special commands
 
 #### users.MealPlan
 - AI-generated meal plan
 - Links user to daily menu
-- Dish quantities via through-model
-- Status tracking (pending → approved → completed)
-- AI explanation text
+- Dish quantities via MealPlanDish through-model
+- Status tracking: pending → approved → completed
+- AI explanation/tips text
 
 #### users.MealHistory
-- Records of eaten meals
+- Records of consumed meals
 - Quantity tracking
-- Links to meal plans
+- Links to meal plans for context
 
 #### users.UserFeedback
 - Rating system: -2 to +2
@@ -98,147 +134,103 @@ HUDS/
 - Free-form comments
 - Linked to meal history
 
-### 3. Telegram Bot (✅ Complete)
-- **Commands implemented**:
-  - `/start` - Registration
-  - `/help` - Command list
-  - `/preferences` - Set dietary restrictions
-  - `/goals` - View nutritional goals
-  - `/today` - Get today's meal plans
-  - `/history` - View meal history
-  - `/feedback` - Provide feedback
+## 🚀 Deployment Architecture
 
-- **Message formatting**: Markdown support
-- **Interactive**: Reply-based feedback collection
-- **Async**: Uses python-telegram-bot 20.7
+### Railway Services (6)
+```
+├── Postgres (managed database)
+├── Redis (managed cache)
+├── App Service (Django + WhiteNoise)
+│   ├── Runs migrations
+│   ├── Creates superuser (admin/admin123)
+│   ├── Sets up periodic tasks
+│   └── Serves web app and admin
+├── Worker Service (Celery worker)
+│   └── Processes background tasks
+├── Cron Service (Celery Beat)
+│   └── Schedules periodic tasks
+└── Bot Service (Telegram bot)
+    └── Handles user interactions
+```
 
-### 4. AI Meal Planning (✅ Complete)
-- **Integration**: Uses existing `huds_lib/model.py`
-- **Context-aware**: Considers user preferences, goals, history
-- **Iterative**: Generate → evaluate → revise loop
-- **Personalized**: Different plans per user
-- **Nutritionally balanced**: AI optimizes macro/micronutrients
-
-### 5. Scheduled Tasks (✅ Complete)
-
-#### Celery Tasks (in `menu/tasks.py` and `users/tasks.py`)
-1. `fetch_tomorrow_menus()` - Fetch next day's menus
-2. `generate_meal_plans_for_meal(meal_type)` - Generate plans for all users
-3. `send_meal_notifications(meal_type)` - Send via Telegram
-4. `generate_and_send_meal_plans(meal_type)` - Combined task
-
-#### Schedule (configured via Django Celery Beat)
-- 11:00 PM: Fetch tomorrow's menus
-- 6:30 AM: Generate & send breakfast plans
-- 10:30 AM: Generate & send lunch plans
-- 3:30 PM: Generate & send dinner plans
-
-### 6. Admin Interface (✅ Complete)
-- **Dishes**: Full CRUD, nutritional data editing
-- **Daily Menus**: Manage menus, filter by date/meal
-- **User Profiles**: Edit goals, preferences, notifications
-- **Meal Plans**: View/edit generated plans
-- **Meal History**: Track what users ate
-- **Feedback**: View all ratings and comments
-- **Celery Beat**: Schedule periodic tasks
-
-### 7. Docker Infrastructure (✅ Complete)
-
-#### Services
-1. **web**: Django + Gunicorn (port 8000)
-2. **db**: PostgreSQL 15 (port 5432)
-3. **redis**: Redis 7 for Celery (port 6379)
-4. **nginx**: Reverse proxy (port 80)
-5. **celery-worker**: Background task processing
-6. **celery-beat**: Task scheduler
-7. **telegram-bot**: Bot service
-
-#### Features
-- Health checks on db and redis
-- Volume persistence for database
-- Automatic migrations on startup
-- Environment variable configuration
-- Service dependencies properly configured
+### Local Development (7 services)
+```
+├── db (PostgreSQL)
+├── redis
+├── web (Django)
+├── nginx (Reverse proxy)
+├── celery-worker
+├── celery-beat
+└── telegram-bot
+```
 
 ## 🔄 Complete Workflow
 
-### Daily Cycle
+### Daily Automation Cycle
 
 **11:00 PM** (Night Before)
 1. Celery Beat triggers `fetch_tomorrow_menus`
-2. Scrapes HUDS website for breakfast, lunch, dinner
-3. Parses nutritional data for each dish
-4. Stores in `Dish` and `DailyMenu` models
+2. Scrapes HUDS website for all meals
+3. Parses nutritional data using BeautifulSoup
+4. Stores in Dish and DailyMenu models
 
-**6:30 AM** (Breakfast Time)
+**6:30 AM** (Breakfast)
 1. Celery Beat triggers `generate_and_send_meal_plans('breakfast')`
 2. For each user with breakfast notifications:
-   - Retrieves user preferences and goals
-   - Fetches user's meal history and feedback
-   - Calls AI (OpenAI GPT) to generate plan
-   - Creates `MealPlan` with recommended dishes
+   - Retrieves preferences, goals, and feedback
+   - Calls AI to generate personalized plan
+   - Creates MealPlan with recommended dishes
    - Sends formatted message via Telegram
-3. Users receive personalized breakfast recommendations
 
-**10:30 AM** (Lunch Time)
-- Same process for lunch
+**10:30 AM** (Lunch) - Same process for lunch
 
-**3:30 PM** (Dinner Time)
-- Same process for dinner
+**3:30 PM** (Dinner) - Same process for dinner
 
 ### User Interaction Flow
 
-1. **Registration**:
-   - User sends `/start` to bot
-   - Creates Django `User` and `UserProfile`
-   - Links Telegram chat_id
+1. **Registration**: `/start` → Creates User + UserProfile → Links Telegram chat_id
 
-2. **Preference Setting**:
-   - `/preferences vegetarian, no pork`
-   - Updates `UserProfile.dietary_restrictions`
+2. **Preference Setting**: `/preferences vegetarian, no pork` → Updates dietary_restrictions
 
-3. **Receiving Meal Plan**:
-   - Bot sends formatted meal plan
-   - Shows dishes with quantities
-   - Includes calorie info
-   - Provides AI explanation
+3. **Manual Meal Request**: `/nextmeal` → AI generates plan based on current time
 
-4. **Feedback**:
-   - User replies with feedback
-   - AI extracts rating (-2 to +2)
-   - Creates `UserFeedback` record
-   - Updates influence on future plans
+4. **Meal Logging**: 
+   - `/logmeal I ate waffles and berries`
+   - AI parses: "Waffles (1.0), Strawberries (1.0)"
+   - Matches to menu items
+   - Creates MealHistory records
+   - Calculates nutrition totals
 
-5. **Meal History**:
-   - System tracks approved meals
-   - Creates `MealHistory` records
-   - Links to original `MealPlan`
+5. **Feedback**:
+   - User replies: "Too sweet, prefer less sugar"
+   - AI extracts rating: -1 (bad)
+   - Creates UserFeedback record
+   - Influences future meal plans
 
 ## 🛠️ Configuration
 
-### Environment Variables (.env)
+### Environment Variables
 ```env
-# Database
-POSTGRES_DB=huds_db
-POSTGRES_USER=huds_user
-POSTGRES_PASSWORD=your_password
+# Database (Railway managed)
+PGDATABASE, PGUSER, PGPASSWORD, PGHOST, PGPORT
 
-# Django
-DJANGO_SECRET_KEY=your_secret_key
-DJANGO_DEBUG=True
+# Or Docker Compose
+POSTGRES_DB, POSTGRES_USER, POSTGRES_PASSWORD
 
-# APIs
-TELEGRAM_BOT_TOKEN=bot_token_from_botfather
-OPENAI_API_KEY=sk-proj-...
+# Required
+TELEGRAM_BOT_TOKEN=<from @BotFather>
+OPENAI_API_KEY=<from OpenAI>
+DJANGO_SECRET_KEY=<random 50+ chars>
 
-# Services
-REDIS_URL=redis://redis:6379/0
+# Optional
+OPENAI_MODEL=gpt-4
 TIME_ZONE=America/New_York
+DJANGO_DEBUG=False
 ```
 
 ### Meal Times (settings.py)
 ```python
-BREAKFAST_TIME = '06:30'
+BREAKFAST_TIME = '06:30'  # Auto-generated plan send time
 LUNCH_TIME = '10:30'
 DINNER_TIME = '15:30'
 ```
@@ -253,102 +245,56 @@ rating == 1:  half_life = 60 days   # Good
 rating == 2:  half_life = 90 days   # Love it
 ```
 
-## 🚀 Quick Start
+## 📊 Key Metrics
 
-### Local Development
-```bash
-# 1. Configure environment
-cp env.example .env
-# Edit .env with your tokens
-
-# 2. Start services
-docker-compose up --build -d
-
-# 3. Initialize database
-docker-compose exec web python manage.py migrate
-docker-compose exec web python manage.py createsuperuser
-
-# 4. Set up scheduled tasks via admin
-# Go to http://localhost/admin
-# Add periodic tasks in Django Celery Beat
-
-# 5. Test manually
-docker-compose exec web python manage.py fetch_daily_menu
-```
-
-### ☁️ Cloud Deployment
-For production deployment, see **[CLOUD_DEPLOYMENT.md](CLOUD_DEPLOYMENT.md)**.
-
-**Railway is the recommended option** for its ease of deployment and excellent Docker Compose support.
-
-## 📊 Database Schema Highlights
-
+### Database Scale
 - **Dishes**: ~500-1000 unique dishes over time
-- **DailyMenus**: 3 per day (breakfast, lunch, dinner)
-- **UserProfiles**: 1 per user, Telegram-linked
-- **MealPlans**: 3 per user per day (when active)
-- **MealHistory**: Grows with user activity
+- **DailyMenus**: 3 per day (90/month)
+- **UserProfiles**: 1 per user
+- **MealPlans**: Up to 3 per user per day
+- **MealHistory**: Grows with activity
 - **UserFeedback**: Time-weighted ratings
 
 ### Indexes
 - `Dish.name` - Unique, indexed
-- `DailyMenu.(date, meal_type)` - Unique together, indexed
-- `UserProfile.telegram_chat_id` - Unique, indexed
+- `DailyMenu.(date, meal_type)` - Unique together
+- `UserProfile.telegram_chat_id` - Unique
 - `UserFeedback.rating` - Indexed for aggregation
 - `UserFeedback.feedback_date` - Indexed for time queries
 
-## 🎓 Learning from Feedback
+## 🔧 Recent Bug Fixes & Improvements
 
-The system implements **time-weighted collaborative filtering**:
+### Fixed Issues ✅
+1. **Celery Beat meal notifications** - Added synchronous `format_meal_plan()` function
+2. **Nutrition parsing** - Fixed regex to correctly parse carbohydrates (e.g., "Total Carbohydrate.20.7g")
+3. **Database queries** - Corrected `dailymenu__date__gte` to `menus__date__gte`
+4. **Admin interface** - Added `is_admin` field to user profiles
 
-1. **Collect**: Users rate dishes -2 to +2
-2. **Decay**: Older ratings have less weight
-3. **Different rates**: Dislikes remembered longer
-4. **Integration**: AI considers weighted history
-5. **Adaptation**: Preferences evolve over time
+### New Features ✅
+1. **Interactive date picker** - `/fetch` command with clickable date buttons
+2. **Time-based meal detection** - `/nextmeal` auto-detects meal type
+3. **Meal logging** - `/logmeal` with AI parsing and nutrition tracking
+4. **Admin commands** - `/fetch` and `/stats` for system management
+5. **Automatic setup** - Auto-creates superuser and periodic tasks on Railway
 
-## 🔐 Security Considerations
+## 🚦 Success Criteria (All Met)
 
-- ✅ Environment variables for secrets
-- ✅ PostgreSQL with password
-- ✅ Django secret key
-- ✅ Debug mode configurable
-- ⚠️ For production: Enable HTTPS, restrict ALLOWED_HOSTS, use strong passwords
-
-## 📈 Future Enhancements
-
-Possible additions:
-- REST API for mobile apps
-- Meal plan approval/modification interface
-- Social features (share meals)
-- Nutritionist dashboard
-- ML-based preference learning
-- Multi-dining hall support
-- Allergen warnings
-- Meal swapping/trading
-
-## 📝 Notes
-
-- **OpenAI costs**: ~$0.01-0.05 per meal plan
-- **Scraping**: Respects HUDS server with delays
-- **Data retention**: Old menus kept for history
-- **Privacy**: User data stays in your database
-- **Scalability**: Handles hundreds of users easily
-
-## ✨ Success Criteria (All Met)
-
-✅ Dockerized with Django, PostgreSQL, Nginx, Redis
-✅ Nightly menu fetching with nutritional data
-✅ Comprehensive database models
-✅ AI-powered meal planning
-✅ Telegram bot interface
-✅ Automated scheduling with Celery
-✅ User feedback system
-✅ Time-weighted preferences
-✅ Complete documentation
+✅ Fully automated menu fetching with nutrition data  
+✅ AI-powered personalized meal planning  
+✅ Telegram bot with interactive commands  
+✅ Time-weighted feedback system  
+✅ Meal logging with natural language processing  
+✅ Railway deployment with zero-downtime updates  
+✅ Complete admin interface  
+✅ Automated task scheduling  
+✅ Comprehensive documentation  
 
 ---
 
 **Project Status**: 🎉 **PRODUCTION READY**
 
-All core features implemented and tested. Ready for deployment with proper environment configuration.
+All core features implemented, tested, and deployed on Railway. The system is actively running and serving users with automated meal plans, intelligent recommendations, and comprehensive tracking.
+
+**Recent Deployment**: Railway with managed PostgreSQL and Redis  
+**Latest Updates**: Fixed Celery notifications, added meal logging, improved time-based detection  
+**Documentation**: README.md, RAILWAY_QUICK_START.md, QUICKSTART.md

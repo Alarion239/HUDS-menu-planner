@@ -1,58 +1,74 @@
 # Railway Quick Start Guide
 
-A streamlined guide to deploy HUDS Menu Planning System to Railway in under 15 minutes.
+Deploy HUDS Menu Planning System to Railway in under 15 minutes.
 
 ## 🚀 Prerequisites
 
 - [ ] GitHub repository with your HUDS code
 - [ ] [Railway account](https://railway.app) (free to start)
 - [ ] Telegram Bot Token from [@BotFather](https://t.me/botfather)
-- [ ] OpenAI API Key
+- [ ] OpenAI API Key from [platform.openai.com](https://platform.openai.com/api-keys)
 
-## 📦 One-Time Setup (Do Once)
+## 📦 Step-by-Step Deployment
 
 ### 1. Create Railway Project
 
-```bash
-# Visit https://railway.app
-# Click "New Project" → "Deploy from GitHub repo"
-# Select your HUDS repository
-```
+1. Visit [railway.app](https://railway.app)
+2. Click **New Project** → **Deploy from GitHub repo**
+3. Select your HUDS repository
+4. Railway will create an initial service - **rename it to "App Service"**
 
-### 2. Add Databases (Click "Create" for each)
+### 2. Add Databases
 
-- Add **PostgreSQL** database
-- Add **Redis** database
+Click **Create** for each:
+- **PostgreSQL** database
+- **Redis** database
 
-### 3. Create Services
+Railway auto-creates environment variables for these.
 
-Create 4 separate services by clicking **Create** → **Empty Service** for each:
+### 3. Create Additional Services
 
-| Service Name | Start Command | Public Domain? |
-|--------------|---------------|----------------|
-| **App Service** | `sh -c "python manage.py migrate && python manage.py collectstatic --noinput && gunicorn --bind 0.0.0.0:$PORT --workers 3 huds_project.wsgi:application"` | ✅ Yes |
-| **Worker Service** | `celery -A huds_project worker --loglevel=info --concurrency=3` | ❌ No |
-| **Cron Service** | `celery -A huds_project beat --loglevel=info --scheduler django_celery_beat.schedulers:DatabaseScheduler` | ❌ No |
-| **Bot Service** | `python manage.py run_telegram_bot` | ❌ No |
+Create 3 more **Empty Services** (Click **Create** → **Empty Service**):
+
+| Service Name | Start Command |
+|--------------|---------------|
+| **Worker Service** | `celery -A huds_project worker --loglevel=info --concurrency=3` |
+| **Cron Service** | `celery -A huds_project beat --loglevel=info --scheduler django_celery_beat.schedulers:DatabaseScheduler` |
+| **Bot Service** | `python manage.py run_telegram_bot` |
 
 For each service:
 1. Go to **Settings** → **Source** → Connect your GitHub repo
 2. Go to **Settings** → **Deploy** → Add the start command from table above
-3. Continue to environment variables below
 
-## 🔧 Environment Variables (Add to ALL Services)
+### 4. Configure App Service
+
+Go to **App Service** → **Settings** → **Deploy**:
+
+**Start Command:**
+```bash
+sh -c "python manage.py migrate && python manage.py collectstatic --noinput && python manage.py create_default_superuser && python manage.py setup_periodic_tasks && gunicorn --bind 0.0.0.0:$PORT --workers 3 huds_project.wsgi:application"
+```
+
+This command:
+- Runs database migrations
+- Collects static files
+- Creates default superuser (`admin`/`admin123`)
+- Sets up periodic tasks automatically
+- Starts the web server
+
+### 5. Environment Variables (Add to ALL Services)
 
 Click **Variables** tab in each service and add:
 
 ```env
-# Database (auto-filled by Railway)
+# Database (auto-filled by referencing Postgres service)
 PGDATABASE=${{Postgres.PGDATABASE}}
 PGUSER=${{Postgres.PGUSER}}
 PGPASSWORD=${{Postgres.PGPASSWORD}}
 PGHOST=${{Postgres.PGHOST}}
 PGPORT=${{Postgres.PGPORT}}
 
-# Redis (auto-filled by Railway)
+# Redis (auto-filled by referencing Redis service)
 REDIS_URL=${{Redis.REDIS_URL}}
 
 # Django Settings
@@ -69,136 +85,105 @@ OPENAI_MODEL=gpt-4
 TIME_ZONE=America/New_York
 ```
 
-### Generate Django Secret Key
-
+**Generate Django Secret Key:**
 ```python
 # Run in Python shell
 import secrets
 print(secrets.token_urlsafe(50))
 ```
 
-## 🌐 Generate Public Domain (App Service Only)
+**Important Notes:**
+- Use the syntax `${{ServiceName.VARIABLE}}` to reference other services
+- Add these variables to **ALL 4 services** (App, Worker, Cron, Bot)
+- No quotes around the `${{...}}` references
 
-1. Go to **App Service**
-2. Click **Settings** → **Networking**
-3. Click **Generate Domain**
-4. Save the URL (e.g., `https://huds-production.up.railway.app`)
+### 6. Generate Public Domain (App Service Only)
 
-## 🎬 Deploy All Services
+1. Go to **App Service** → **Settings** → **Networking**
+2. Click **Generate Domain**
+3. Save the URL (e.g., `https://huds-production.up.railway.app`)
+
+### 7. Deploy All Services
 
 Click **Deploy** button on each service in this order:
 1. Postgres & Redis (should already be running)
-2. App Service
+2. **App Service** (wait for it to complete)
 3. Worker Service
 4. Cron Service
 5. Bot Service
 
-## 👤 Create Superuser
-
-```bash
-# Install Railway CLI
-npm i -g @railway/cli
-
-# Login and link to project
-railway login
-railway link
-
-# Create superuser
-railway run python manage.py createsuperuser
-```
-
-Or use Railway dashboard's run command feature.
-
-## ⏰ Configure Scheduled Tasks
+### 8. Access Your Application
 
 1. Visit `https://your-app.up.railway.app/admin`
-2. Login with superuser credentials
-3. Go to **Periodic Tasks** (under Django Celery Beat)
-4. Add these 4 tasks:
+2. Login with default credentials:
+   - **Username**: `admin`
+   - **Password**: `admin123`
+3. **Change the password immediately!**
 
-**Fetch Menus (11 PM Daily)**
-```
-Name: Fetch Tomorrow's Menus
-Task: menu.tasks.fetch_tomorrow_menus
-Cron: 0 23 * * *
-Arguments: []
-```
+### 9. Make Yourself a Bot Admin
 
-**Breakfast Plans (6:30 AM Daily)**
-```
-Name: Breakfast Plans
-Task: users.tasks.generate_and_send_meal_plans
-Cron: 30 6 * * *
-Arguments: ["breakfast"]
-```
-
-**Lunch Plans (10:30 AM Daily)**
-```
-Name: Lunch Plans
-Task: users.tasks.generate_and_send_meal_plans
-Cron: 30 10 * * *
-Arguments: ["lunch"]
-```
-
-**Dinner Plans (3:30 PM Daily)**
-```
-Name: Dinner Plans
-Task: users.tasks.generate_and_send_meal_plans
-Cron: 30 15 * * *
-Arguments: ["dinner"]
-```
+1. In Django admin, go to **User profiles**
+2. Find your profile (or create one by using `/start` on Telegram first)
+3. Check the **"Is admin"** checkbox
+4. Click **Save**
+5. Now you can use `/fetch` and `/stats` commands on Telegram!
 
 ## ✅ Test Your Deployment
 
 ### 1. Check Service Health
 
-```bash
-railway logs --service "App Service"
-railway logs --service "Worker Service"
-railway logs --service "Cron Service"
-railway logs --service "Bot Service"
-```
-
-Or view logs in Railway dashboard.
+View logs for each service in Railway dashboard:
+- **App Service**: Should show "Starting gunicorn"
+- **Worker Service**: Should show "celery@... ready"
+- **Cron Service**: Should show "beat: Starting..."
+- **Bot Service**: Should show "Bot is running!"
 
 ### 2. Test Telegram Bot
 
-Open Telegram and send `/start` to your bot. You should get a welcome message.
+1. Open Telegram and find your bot
+2. Send `/start` - should get welcome message
+3. Send `/help` - should see command list
+4. Send `/nextmeal` - should generate a meal plan (if menus are fetched)
 
-### 3. Manually Fetch Menu
+### 3. Verify Scheduled Tasks
 
-In Django admin, go to **Periodic Tasks** → Find "Fetch Tomorrow's Menus" → Click "Run task"
+1. In Django admin, go to **Periodic Tasks** (under Django Celery Beat)
+2. You should see 4 tasks already configured:
+   - Fetch Tomorrow's Menus (11 PM daily)
+   - Breakfast Plans (6:30 AM daily)
+   - Lunch Plans (10:30 AM daily)
+   - Dinner Plans (3:30 PM daily)
 
-Check Worker Service logs to see task execution.
+### 4. Manually Fetch Menu
+
+1. On Telegram, use `/fetch` command (admin only)
+2. Click a date from the interactive picker
+3. Wait for confirmation message with stats
 
 ## 🎉 You're Live!
 
-Your HUDS system is now deployed! Users can:
+Your bot is now deployed! Users can:
 - `/start` - Register
+- `/nextmeal` - Get meal plan (auto-detects time)
+- `/logmeal I ate chicken and salad` - Log actual meals
 - `/preferences vegetarian, no nuts` - Set preferences
-- `/goals` - View nutrition goals
-- Receive meal plans automatically
+- `/feedback` - Reply to any meal plan to give feedback
+- Receive automated meal plans at 6:30 AM, 10:30 AM, and 3:30 PM
 
-## 🐛 Troubleshooting
+## 🐛 Common Issues
 
 | Problem | Solution |
 |---------|----------|
-| Service won't start | Check logs for errors; verify all env variables are set |
-| Database connection failed | Ensure Postgres service is running; check variable syntax `${{Postgres.PGDATABASE}}` |
-| Static files missing | Verify `collectstatic` in start command; check WhiteNoise in settings |
-| Bot not responding | Check bot token; view Bot Service logs |
-| Tasks not running | Check Cron Service logs; verify periodic tasks in admin |
+| Service won't start | Check logs; verify all env variables are set correctly |
+| Database connection failed | Ensure Postgres is running; check syntax `${{Postgres.PGDATABASE}}` (no quotes!) |
+| Static files missing | Verify `collectstatic` in App Service start command |
+| Bot not responding | Check TELEGRAM_BOT_TOKEN; view Bot Service logs |
+| Tasks not running | Check Cron Service logs; verify periodic tasks exist in admin |
+| Admin password doesn't work | Check App Service logs for "Superuser created/updated" message |
 
-## 📊 Monitor Costs
+## 🔧 Update Deployment
 
-- View usage in Railway dashboard
-- Free trial: $5 credit
-- Hobby plan: $5/month
-- Pro plan: $20/month for more resources
-
-## 🔄 Update Deployment
-
-Just push to GitHub! Railway auto-deploys on push.
+Railway auto-deploys when you push to GitHub:
 
 ```bash
 git add .
@@ -207,10 +192,43 @@ git push origin main
 # Railway automatically redeploys
 ```
 
-## 📚 Full Documentation
+## 💰 Cost Estimate
 
-For detailed explanations, see [RAILWAY_DEPLOYMENT.md](RAILWAY_DEPLOYMENT.md)
+- **Free Trial**: $5 credit (enough for testing)
+- **Hobby Plan**: $5/month (500 hours execution time)
+- **Pro Plan**: $20/month (more resources)
+
+**Typical usage**: 4 services running 24/7 ≈ $5-10/month
+
+## 📊 Monitor Usage
+
+- View resource usage in Railway dashboard
+- Check service metrics for CPU/memory
+- Monitor database storage
+
+## 🔒 Security Best Practices
+
+1. **Change default admin password** immediately after first login
+2. Use **strong, unique** Django secret key (50+ characters)
+3. Keep `DJANGO_DEBUG=False` in production
+4. Never commit API keys to GitHub
+5. Use Railway's environment variables, not `.env` files
+
+## 📚 Next Steps
+
+1. **Customize meal times**: Edit in Django admin or `settings.py`
+2. **Add more users**: Have them send `/start` to the bot
+3. **Set up feedback**: Reply to meal plans to train the AI
+4. **Monitor logs**: Check Railway dashboard regularly
+5. **Update the app**: Just push to GitHub!
+
+## 🆘 Need Help?
+
+- **Railway Discord**: [railway.app/discord](https://railway.app/discord)
+- **Railway Docs**: [docs.railway.app](https://docs.railway.app)
+- **Check logs**: View in Railway dashboard for each service
+- **Review README**: See [README.md](README.md) for detailed info
 
 ---
 
-**Need help?** Join [Railway Discord](https://railway.app/discord)
+**Deployment complete!** Your HUDS Menu Planning System is now live on Railway. 🎊
